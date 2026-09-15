@@ -61,12 +61,15 @@ If something specific stops you using it, please report it — a named problem i
 Needs **Windows**, **Python 3.8+** on your PATH, and a **Chromium-based browser** (Chrome, Edge,
 Brave…). Firefox works but opens a normal tab instead of the app window.
 
-1. Unzip the folder anywhere — it runs from where you put it. There is no installer.
+1. **Download it** from the [latest release](https://github.com/vidi-vinci/vv-curator/releases/latest)
+   — the file called **Source code (zip)**. Despite the name, that is the whole app, ready to
+   run; there is no separate build.
+2. Unzip the folder anywhere — it runs from where you put it. There is no installer.
    **Right-click the zip → Properties → tick Unblock → Apply, before extracting.** Windows marks
    downloaded files and may refuse to run `start.bat`; unblocking the zip clears every file inside
    it at once.
-2. Double-click **`start.bat`**.
-3. Add a folder of images when the app asks.
+3. Double-click **`start.bat`**.
+4. Add a folder of images when the app asks.
 
 On first run it installs three Python packages — **Pillow**, **Send2Trash** and **imageio-ffmpeg** —
 into the Python you already have. Everything else is standard library, and the frontend is vanilla JS
