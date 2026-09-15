@@ -207,6 +207,21 @@ check('the band is hidden by default, so a missing class means absent, not broke
       prop(band, 'display') == 'none', prop(band, 'display'))
 
 # ---- 4. a song card is exempt, the same way its caption is --------------------------------------
+# A BAND WITH NOTHING TO SHOW AT REST MUST NOT DRAW ITSELF. cardFactsHTML emits the band whenever
+# ANY tier has content, and the hover tier is display:none until you point at the card -- so setting
+# every detail to "On hover" left a scrim strip with no text in it. It is keyed on the absence of an
+# always-row and not on the settings, because the band is per-ITEM: Duration is an Always row that
+# only a video fills, so one setting gives a full band on a video and an empty one on a still.
+hide_empty = re.search(r'\.grid\.cards-lg \.card \.card-facts:not\(:has\(\.cf-always\)\)\s*\{([^{}]*)\}', CSS)
+check('a band with no always-row is hidden at rest',
+      bool(hide_empty) and 'display: none' in hide_empty.group(1), hide_empty and hide_empty.group(1))
+show_hover = re.search(r'\.grid\.cards-lg \.card:hover \.card-facts:not\(:has\(\.cf-always\)\)\s*\{([^{}]*)\}', CSS)
+check('  ...and comes back on hover', bool(show_hover) and 'display: flex' in show_hover.group(1),
+      show_hover and show_hover.group(1))
+# Source order matters: both rules are the same specificity, so the hover one has to come second.
+if hide_empty and show_hover:
+    check('  ...with the hover rule LAST, or it never wins', show_hover.start() > hide_empty.start())
+
 check('a song face suppresses the band', '.card:has(.song-face) .card-facts' in CSS)
 check('  ...as it already does the filename caption', '.card:has(.song-face) .cap' in CSS)
 

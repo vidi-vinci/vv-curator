@@ -2732,6 +2732,17 @@ button.danger:hover:not(:disabled):not([aria-disabled="true"]) { background: var
 .card .card-facts .cf-hover { display: none; }
 .card:hover .card-facts .cf-hover { display: block; }
 .grid.cards-lg .card .card-facts { display: flex; }
+/* A BAND WITH NOTHING TO SAY AT REST MUST NOT DRAW ITSELF. cardFactsHTML emits the band whenever
+   ANY tier has content, but the hover tier is display:none until you point at the card -- so setting
+   every detail to "On hover" (or leaving only Duration on Always, which an image does not have) left
+   a scrim strip with no text in it. The author, testing: "i tried turning off most card info in
+   Settings, and the result was a narrow blank strip on the card."
+   Keyed on the ABSENCE of an always-row rather than on the settings, because the band is per-ITEM:
+   Duration is an Always row that only videos fill, so the same settings give a full band on a video
+   and an empty one on a still. Only the card knows. Both rules carry the .grid.cards-lg prefix to
+   match the specificity of the line above, and the hover one comes second so it wins. */
+.grid.cards-lg .card .card-facts:not(:has(.cf-always)) { display: none; }
+.grid.cards-lg .card:hover .card-facts:not(:has(.cf-always)) { display: flex; }
 /* THE MARKS STEP UP WITH THE CARD. Same two thresholds the thumbnail sizes use -- Large is 256 and
    Extra-large 512 -- so a badge stays roughly 8% of the card instead of shrinking from 12.5% to
    3.1% as you grow the grid. One declaration each: every mark at the card's foot derives from

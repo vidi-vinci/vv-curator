@@ -4455,6 +4455,19 @@ async function recycleSetOthers() {
       if (cur) cur.outerHTML = cardHTML(oldItem);
       refreshStripItem(oldItem.id, kept.id);   // and the badge comes back with the set
       if (state.rootFiles != null) state.rootFiles += drop.length;
+      // AND THE OPEN VIEW, which this used to leave behind. Undo put the grid card back and nothing
+      // else: state.setMembers stays null, because the last openDetail ran on the kept SINGLE and a
+      // single has no members. So the set view did not come back and the arrows had nothing to step
+      // through -- the author, having culled from the zoomed view: "after undo, I can't use the
+      // arrows to move between two images from 1 run (e.g. Raw and Detail)."
+      // Safe to re-fetch here: Undo.run() awaits the server's restore before calling this, so the
+      // files are back and /api/image returns the set with its members again.
+      // ONLY IF YOU ARE STILL LOOKING AT IT. With the Keep behavior set to "next" the view has
+      // already moved on to another card, and yanking it back to the set you just undid would be a
+      // second surprise on top of the first.
+      const showing = state.current ? String(state.current.id) : null;
+      const wasThisSet = showing && (showing === String(kept.id) || drop.map(String).includes(showing));
+      if (wasThisSet && !$('#overlay').classList.contains('hidden')) openDetail(oldItem.id);
     };
   } else {
     if (idx !== -1) state.items.splice(idx, 1);
