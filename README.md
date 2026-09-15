@@ -32,7 +32,7 @@ anything, asks before the first one, and can be switched off in Settings.
   is what "update it as things get checked" turns into; if something is fixed, say so in a clause,
   not a new bullet.
 -->
-## You are testing a beta
+## This is the first beta
 
 This has only ever run on one machine, against one library. **The most useful thing you can report
 is whether it reads *your* files** — if images come up with no prompt or no model where you expect
