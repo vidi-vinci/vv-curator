@@ -1,0 +1,29 @@
+# VV Curator runtime dependencies.
+#
+# You do not normally need this file: start.bat installs these on first launch.
+# It exists so the dependencies are DECLARED somewhere a person can read, rather
+# than only being discoverable by running the app.
+#
+# Deliberately unpinned, to match what start.bat actually installs. A pin here
+# would be a claim this project does not test and cannot keep true.
+#
+#   pip install -r requirements.txt
+#
+# Everything else the server uses is Python standard library, and the frontend
+# has no build step and no package manager.
+
+# Thumbnails, and image dimensions at scan time.
+Pillow
+
+# Recycling to the OS Recycle Bin. On network shares the app routes deletes to a
+# _ToRecycle folder instead, because send2trash hard-deletes there.
+Send2Trash
+
+# Video poster-frame thumbnails. Ships its own ffmpeg binary (~50MB).
+# Optional in practice: thumbs.py falls back to a system ffmpeg on PATH, and
+# without either, videos simply get no thumbnail.
+imageio-ffmpeg
+
+# NOT here on purpose: anything an extension needs. An extension installs into its
+# OWN virtualenv, inside its own folder, so nothing heavy ever touches the app's
+# Python -- the quality scorer pulls torch that way and the app never sees it.

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>VV Curator</title>
+<meta name="theme-color" content="#14161a">
+<!--
+  PARKED — NOTHING LOADS THIS FILE TODAY. start.bat no longer opens it; see the comment there.
+  Kept because the approach is sound and the measurements below were expensive to get; deleted
+  from the launch path, not from the repo.
+
+  WHY IT WAS WITHDRAWN. Opening the window at `--app=file:///…/app/splash.html` gave it a different
+  identity from the `http://localhost` page it then navigated to — and Chromium keys an --app
+  window's remembered POSITION to that identity. So the window saved its bounds under one name and
+  looked for them under another, and came back full-height at the left of the screen every session.
+  The splash bought ~250ms to first window and cost the user his window position every time he
+  opened the app. Bad trade, and it took a while to see because the two facts look unrelated.
+
+  THE ROUTE BACK, if it is ever wanted: have the SERVER bind its port before it indexes, and serve
+  this page itself while it works. Same origin, so the identity stays stable and Chromium keeps
+  doing the positioning it was doing correctly for months — and the window still appears early.
+
+  What it was, and what was verified while building it: the launcher used to do ~1.5s of work
+  (dependency check, killing a stale server, starting Python, waiting for the port) with nothing on
+  screen, and only then open the browser, which itself takes ~426ms to paint. Opened first at this
+  file, the window arrived at ~950ms instead. An --app window navigating file:// -> http://localhost
+  KEEPS its chromeless shape (39px of title bar before and after, no tab strip, no address bar) —
+  true, and the thing the approach rested on. It just was not the only thing that mattered.
+
+  DELIBERATELY SELF-CONTAINED — no /static/style.css, no tokens, literal hex. The stylesheet is
+  served by the very server this page is waiting for, so a link to it would be a request that
+  cannot succeed. The colours below are copies of --bg / --fg / --muted and the brand mark; if the
+  theme's base changes, change them here too. This is the one file in the app allowed to hardcode
+  them, and this comment is the reason.
+-->
+<style>
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: #14161a; color: #9aa3af;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+    font: 13px/1.4 system-ui, "Segoe UI", Roboto, sans-serif;
+    -webkit-user-select: none; user-select: none; cursor: default;
+  }
+  svg { width: 108px; height: 108px; }
+  /* The four squares breathe in sequence rather than the whole mark pulsing: it reads as working
+     rather than as a throb, and it keeps the tile's edges still. */
+  .sq { animation: vv-breathe 1.6s ease-in-out infinite; }
+  .sq2 { animation-delay: .12s; }
+  .sq3 { animation-delay: .24s; }
+  .sq4 { animation-delay: .36s; }
+  @keyframes vv-breathe { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+  /* Only shown if the server takes unusually long, so the window is never silently stuck. */
+  #msg { min-height: 1em; opacity: 0; transition: opacity .3s; }
+  #msg.show { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    .sq { animation: none; opacity: 1; }
+    #msg { transition: none; }
+  }
+</style>
+</head>
+<body>
+  <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs><linearGradient id="splashBg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#222730"/><stop offset="1" stop-color="#12141a"/></linearGradient></defs>
+    <rect x="0" y="0" width="256" height="256" rx="52" fill="url(#splashBg)"/>
+    <rect x="2" y="2" width="252" height="252" rx="50" fill="none" stroke="#ffffff" stroke-opacity="0.12" stroke-width="1.5"/>
+    <rect class="sq sq1" x="30" y="30" width="91" height="91" rx="15" fill="#4f8cff"/>
+    <rect class="sq sq2" x="135" y="30" width="91" height="91" rx="15" fill="#3fb950"/>
+    <rect class="sq sq3" x="30" y="135" width="91" height="91" rx="15" fill="#e0b23a"/>
+    <rect class="sq sq4" x="135" y="135" width="91" height="91" rx="15" fill="#9a6ff0"/>
+  </svg>
+  <div id="msg" role="status"></div>
+<script>
+(function () {
+  'use strict';
+  // The port arrives in the hash: start.bat reads it from config.json, so the two can't disagree.
+  var port = (location.hash || '').replace('#', '').replace(/[^0-9]/g, '') || '8770';
+  // localhost, never 127.0.0.1 — localStorage is per-origin and every remembered setting (sidebar
+  // width, filters, toggles) lives under localhost. Navigating to the other spelling would silently
+  // present a factory-fresh app.
+  var url = 'http://localhost:' + port + '/';
+  var t0 = Date.now(), gone = false;
+
+  function go() {
+    if (gone) return;
+    gone = true;
+    location.replace(url);
+  }
+
+  // Readiness probe. An <img> against a real image the server serves: onload means the server
+  // answered, onerror means it did not, and unlike fetch() it is not subject to CORS at all.
+  // (fetch(..., {mode:'no-cors'}) was verified to work here too; the image is chosen because it
+  // needs no error-swallowing and behaves the same on every Chromium.)
+  function poll() {
+    if (gone) return;
+    var probe = new Image();
+    probe.onload = go;
+    probe.onerror = function () { setTimeout(poll, 120); };
+    probe.src = 'http://localhost:' + port + '/static/icon.png?t=' + Date.now();
+  }
+  poll();
+
+  // Say something if this is taking unusual time — a first-ever index legitimately takes a while,
+  // and a silent logo forever is the one outcome worse than a slow start.
+  setTimeout(function () {
+    if (gone) return;
+    var m = document.getElementById('msg');
+    m.textContent = 'Indexing your library — this happens once.';
+    m.className = 'show';
+  }, 6000);
+  setTimeout(function () {
+    if (gone) return;
+    var m = document.getElementById('msg');
+    m.textContent = 'Still starting. Check data\\viewer.log if this persists.';
+    m.className = 'show';
+  }, 45000);
+}());
+</script>
+</body>
+</html>

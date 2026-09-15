@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- App icon: the same mark as the sidebar brand logo in index.html. Keep the two in sync. -->
+  <defs>
+    <linearGradient id="vvIconBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#222730"/>
+      <stop offset="1" stop-color="#12141a"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="256" height="256" rx="52" fill="url(#vvIconBg)"/>
+  <rect x="2" y="2" width="252" height="252" rx="50" fill="none" stroke="#ffffff" stroke-opacity="0.12" stroke-width="1.5"/>
+  <rect x="30" y="30" width="91" height="91" rx="15" fill="#4f8cff"/>
+  <rect x="135" y="30" width="91" height="91" rx="15" fill="#3fb950"/>
+  <rect x="30" y="135" width="91" height="91" rx="15" fill="#e0b23a"/>
+  <rect x="135" y="135" width="91" height="91" rx="15" fill="#9a6ff0"/>
+</svg>

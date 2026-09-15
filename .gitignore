@@ -1,0 +1,37 @@
+# What running VV Curator creates. None of it is source, and none of it should be committed.
+
+# Your library index, thumbnail cache and logs. Rebuilt by rescanning.
+data/
+# Your settings: library paths, theme, window position. Per install, never shared.
+config.json
+# Only if you made one, to move the app off port 8770.
+port.txt
+
+__pycache__/
+*.pyc
+
+# An extension builds its environment and downloads its models inside its own folder, which is the
+# point: deleting the folder removes everything it ever fetched. None of it is source.
+extensions/*/venv/
+
+# The ComfyUI saver node's model/LoRA hash cache. Regenerated on demand.
+comfy_vv_saver/model_hashes.db
+
+# Somewhere to drop a few images for testing without them landing in git.
+samples/
+# Hand-provided model/LoRA files for testing hash-based Civitai resource linking: multi-GB, and
+# nobody's real models folder belongs in a repo.
+test_models/
+
+# Test scratch. Each test cleans up after itself; this is the backstop for a run that is
+# interrupted, and for the one that held a file handle open so Windows would not delete it.
+tests/_tmp_*/
+tests/_tmp_*.mp4
+tests/_tmp_*.png
+vv_cull_*/
+vv_face_*/
+
+# Editor and agent config, which is yours rather than the project's.
+.claude/
+.vscode/
+.idea/

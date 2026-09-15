@@ -1,0 +1,1285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- THE APP NAME AND NOTHING ELSE. It read "VV Curator — ComfyUI outputs" until 2026-09-14;
+       The author, seeing it in a screenshot: "can we just drop the ComfyUI outputs part?" A window title
+       names the window, and the subtitle was describing the app to someone already inside it.
+       The placeholder here USED TO SAY "Loading...", which a first-time user with no library read
+       in their taskbar for as long as they had no library, because the code path that replaces it
+       returned early. Shipping the real name as the static title retires that whole class of bug:
+       there is now no state in which the title is wrong. data-title-base stays, empty, because
+       the app still rewrites the title from the name the server reports. -->
+  <title data-title-base="">VV Curator</title>
+  <!-- SVG for a crisp tab; the PNG is what Chrome turns into the --app window's taskbar icon. -->
+  <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+  <link rel="icon" type="image/png" sizes="256x256" href="/static/icon.png">
+  <!-- Tints an --app window's title bar. Kept in step with a custom theme by applyTheme(). -->
+  <meta name="theme-color" content="#14161a">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="layout">
+    <aside id="sidebar" class="tab-filters">
+      <!-- `full` is gone: it spanned the sidebar grid's two columns, and this row left the
+           grid flow on 2026-09-08 when it was anchored to the top of the rail. -->
+      <div class="brand">
+        <svg class="app-logo" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <defs><linearGradient id="appLogoBg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#222730"/><stop offset="1" stop-color="#12141a"/></linearGradient></defs>
+          <rect x="0" y="0" width="256" height="256" rx="52" fill="url(#appLogoBg)"/>
+          <rect x="2" y="2" width="252" height="252" rx="50" fill="none" stroke="#ffffff" stroke-opacity="0.12" stroke-width="1.5"/>
+          <rect x="30" y="30" width="91" height="91" rx="15" fill="#4f8cff"/>
+          <rect x="135" y="30" width="91" height="91" rx="15" fill="#3fb950"/>
+          <rect x="30" y="135" width="91" height="91" rx="15" fill="#e0b23a"/>
+          <rect x="135" y="135" width="91" height="91" rx="15" fill="#9a6ff0"/>
+        </svg>
+        <span data-app-name>Loading…</span>
+        <!-- DRAWN ONLY WHEN THERE IS ONE, which is why it has no dimmed state: a control that
+             cannot apply is hidden, not disabled, and "no update available" is nothing to explain.
+             A BARE ARROW, not the download tray beside it in the detail bar — that one already
+             means Export for Civitai. Not the Octocat either: it is a trademark, and a filled
+             detailed mark in a row of outlines cannot read as one silhouette at 15px. The word
+             GitHub goes inside the pop-up, where there is room to be explicit. -->
+        <button id="btnUpdate" class="brand-btn is-update hidden" title="A new version is available" aria-label="A new version is available"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14" /> <path d="m19 12-7 7-7-7" /></svg></button>
+        <button id="btnHelp" class="brand-btn" title="Help" aria-label="Help"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /></svg></button>
+        <button id="btnSettings" class="brand-btn" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /> <circle cx="12" cy="12" r="3" /></svg></button>
+      </div>
+
+      <!-- Libraries: a STATUS STRIP, not a field. This row has been through three shapes now. It was
+           a section header plus a row per library; then one collapsed row; then a full-height field
+           to match Model. The FIELD was the mistake: .facet-trigger is the same component Model and
+           Folder use, and it says "this is a value you set here" — but the steady state is "all of
+           them, ticked", and what you actually do with this row is READ it.
+           So there is no field left. THREE ITEMS as of 2026-08-21, and they are one subject: how
+           much of the library is in scope, a tick to go and check it for new files, and whether
+           auto-refresh is doing that for you. Setting the scope means opening the list, which is
+           what the first item does — and ＋ Add library went into that list, since it is setup, not
+           browsing.
+           The strip has been trimmed twice now, both times by deleting rather than by arranging.
+           The matched count went on 2026-08-20 (the action bar already said it), and the three
+           status readouts went on 2026-08-21 (see the block below). What survived both cuts is the
+           set that shares ONE subject — the library on disk — which is also why the two actions
+           sit beside the folder rather than being pushed to the far edge as they were.
+           NOTE the height rule this does NOT break: "every FIELD in the rail is one height" still
+           stands, because this row now contains none. It belongs with the rail's readouts (.tcount,
+           .ftab-badge), so there is nothing left for it to read as a shorter version OF — which is
+           exactly what made the compact FIELD look arbitrary beside Model.
+           WHY IT SITS ABOVE THE SNAPSHOTS RULE (2026-08-20). Everything in this strip is a GLOBAL
+           EXCLUSION — a rule that removes rows without a filter being switched on — and none of the
+           three is saved by a snapshot, cleared by Reset or counted in a tab badge: hide-large, the
+           Hidden peek, and now the library selection, which stopped being a filter because it is
+           SCOPE (the author: "I often just work with the local Jung library... but I want to clear
+           filters"). The server has classed it that way since the merged DB — _filters() puts the
+           roots clause with the global exclusions, "a library being switched off is library
+           visibility, not a search term" — so this move makes the rail agree with the backend.
+           The strip therefore has to be ABOVE the rule, or the rule's claim is false. -->
+      <div class="lib-row full">
+        <!-- THE LABEL CAME BACK on 2026-09-08, once the strip was down to three items. The author: "would
+             help anchor perhaps the most important thing over there." It also makes this row match
+             every other one in the rail, which carries its name in the same left column — this was
+             the only labelled-worthy row without one, because it is full-bleed and spans both grid
+             columns, so it had nowhere for a label to land.
+             It sits ON the band at the label column's width, so it lines up with Sort, Model,
+             Folder and the rest below while the band stays full width. A span, not a label: it
+             names a GROUP of three controls, and a <label> with no control to point at is a lie to
+             a screen reader — which already hears "Libraries in scope" from the button itself. -->
+        <span class="ctl-label lib-label" aria-hidden="true">Libraries</span>
+        <!-- The three controls are GROUPED so that a narrow rail wraps them within their own
+             column. Ungrouped they were direct flex children beside the label, so the third one
+             wrapped to the rail's left EDGE and sat orphaned under the label instead of under its
+             two siblings. Measured at a 260px rail before this wrapper existed. -->
+        <div class="lib-row-items">
+        <div class="lib-dd" id="libDD">
+          <!-- A real <button>: aria-haspopup/expanded carry what the chevron used to say, and the
+               aria-label matters because "3/3" read aloud on its own means nothing. -->
+          <button class="lib-stat" id="libScope" type="button" aria-haspopup="true" aria-expanded="false"
+                  aria-label="Libraries in scope" title="Which libraries the grid is drawn from"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 5a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h2.5a1.5 1.5 0 0 1 1.2.6l.6.8a1.5 1.5 0 0 0 1.2.6z" /> <path d="M3 8.268a2 2 0 0 0-1 1.738V19a2 2 0 0 0 2 2h11a2 2 0 0 0 1.732-1" /></svg><span class="lib-stat-n" id="libScopeN">0/0</span></button>
+          <div id="libPanel" class="facet-panel popmenu hidden">
+            <div id="libList" class="rootlist"></div>
+            <!-- OUTSIDE #libList on purpose: renderLibList() writes innerHTML, so a row inside the
+                 list would be destroyed on every repaint and take its listener with it. -->
+            <div class="popmenu-sep"></div>
+            <!-- THE SCOPE IS THE MENU IT IS IN. This acts on every library, so it belongs here and
+                 not in a row's ⋯, which is about one — the author's placement, and the same category fix
+                 Clear Quality scores got. "All" means all: every file re-read, not the quick check
+                 the ✓ does. -->
+            <button id="libRescanAll" class="has-ico" type="button">Rescan all libraries…</button>
+            <button id="libAdd" class="has-ico" type="button">Add library…</button>
+          </div>
+        </div>
+        <!-- THREE READOUTS LEFT THIS STRIP ON 2026-08-21, and the reasoning is worth keeping
+             because each argument for them was sound and lost anyway. They were: a folder-✕ when a
+             selected library was unreachable, `⊘ N` for files the size rule was holding back, and
+             an eye with a count that toggled the hidden-file peek.
+             The author: "if I'm offline, I know it" — and the Libraries list still says offline per
+             library, so nothing became unknowable. The size rule and the hidden peek moved into
+             Settings → General in August, and both were removed outright on 2026-09-08.
+             The strip that remains is one thing: the library, and the two actions against it. -->
+        <!-- PINNED TO THE FAR EDGE, in a wrapper rather than on a margin. The note in
+             .lib-row-items called this shot: "If anything is ever added here that belongs at the
+             far edge, the cluster is the pattern to bring back rather than an auto-margin on a bare
+             child." A bare child's auto-margin survives only while the row does not wrap; at a
+             narrow rail it would strand one of these two on its own line.
+             THE CHECK IS LAST, on the outside edge, because it is the one you reach for -- The author,
+             2026-09-14: "easier to click if/when needed." Swapped in the MARKUP and not with
+             `order`, so tabbing through the rail meets them in the sequence the eye does. -->
+        <div class="rail-cluster">
+        <!-- A BARE TICK (Lucide `check`), literally "check the files". The author, 2026-08-21, and
+             the plainness is the point — no ornament, no circle, no arrow.
+             THE HISTORY, because this button keeps going wrong and the record is what stops the
+             same swap being tried twice: text ↻ -> frame-and-plus -> a circled ? (2026-08-20) ->
+             `refresh-cw` -> this, all inside a fortnight. The ? was read as HELP, which the block
+             that stood here had predicted as the thing to re-check. The circular arrow that
+             replaced it was correct and unremarkable, and lost to a rule about the ROW rather
+             than about itself: Reset two items along is an undo arrow, and two arrows in one strip
+             is one arrow too many.
+             WHAT MAKES A TICK SURVIVE WHERE THE OTHERS DIDN'T: it is the only mark here that is a
+             single open stroke. Nothing else in the strip — folder, eye, stopwatch, undo arrow —
+             shares a silhouette with it, and it is the most legible shape in the set at 16px.
+             WHAT IT COSTS, recorded so it is re-checked and not re-litigated: a tick also means
+             DONE, and the app already uses this exact path for a selected card and for `.done`
+             buttons. Neither is in this strip, and neither is a verb — but if this mark ever reads
+             as "these files are fine" rather than "go and check them", that is the failure to
+             watch for.
+             The amber `.dirty` state is unchanged and carries the report: the mark goes --modified
+             when a library has changed on disk. The verb lives in the glyph, the state in the
+             colour. -->
+                <!-- A MODE, so it stays on the strip: you have to see at a glance whether the app is picking
+             up new files on its own. Stopwatch rather than a clock — this is elapsed idle, not time. -->
+        <button id="autoRefresh" class="lib-stat mark-only auto-btn" type="button" title="Auto-refresh: pick up new images while you're idle" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" x2="14" y1="2" y2="2" /> <line x1="12" x2="15" y1="14" y2="11" /> <circle cx="12" cy="14" r="8" /></svg></button>
+        <button id="libRefreshAll" class="lib-stat mark-only lib-refall" type="button" title="Check for new files on disk (R)" aria-label="Check for new files and rescan changed libraries"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg></button>
+        </div>
+        <!-- The pipe came WITH Reset rather than being deleted with the cluster. Its rationale is
+             unchanged and simply points somewhere else now: it separates two different VERBS
+             standing shoulder to shoulder. On the Snapshots row those were "make a snapshot" and
+             "undo everything"; here they are "watch for new files" and "undo everything", and the
+             need is sharper, because auto-refresh fills with the SAME accent while it is switched
+             on — so without a break Reset reads as its twin rather than as the master control. -->
+        </div>
+      </div>
+
+      <!-- per-library action menu; positioned by JS next to the row's ⋯ button INSIDE the panel,
+           which is why it's fixed-positioned at a higher z than the panel it opens over -->
+      <div id="libMenu" class="popmenu hidden">
+        <!-- ONE SCAN VERB. `Rebuild metadata` stood here until 2026-09-12 and was the same operation
+             with one shortcut switched off — the difference described an internal optimisation, not
+             anything in the user's library, and the author, who commissioned both: "I've lost the plot.
+             What does rescan do vs. rebuild metadata? And will anyone else get the difference?"
+             Nothing asks the user to choose now: the thorough version is Libraries → Rescan all
+             libraries…, offered by name when an update makes it matter, and a single file catches
+             itself up when you open it. `Rebuild all libraries…` also stood here, in a per-library
+             menu, ignoring the library it was opened from; it moved to the menu that is about all
+             the libraries. -->
+        <button data-act="rescan">Rescan</button>
+        <div class="popmenu-sep"></div>
+        <!-- "Mine tags…" until 2026-09-08. It did not mine tags, it mined FOR them, and nothing is
+             tagged until you pick from the list — which the old label hid twice over. "Scan for" is
+             unambiguously go-looking, where "Find tags" could have read as searching the tags you
+             already have (the Tags rail has a search box that does exactly that). It sits near
+             Rescan on purpose: both look through the library, and this one says what for. -->
+        <button data-act="mine" title="Reads your positive prompts, folder names and file names, then suggests tags from what it finds">Scan for tags…</button>
+        <button data-act="cleartags" title="Remove tags from this library — yours, an extension&#39;s, or both (keeps labels &amp; favorites)">Clear tags…</button>
+        <!-- CLEAR TAGS ASKS WHICH, rather than there being two items. They act on disjoint sets —
+             yours and an extension's — so neither entry was a superset of the other and "both" cost
+             two trips. The extension option only appears while a tagger is installed.
+             CLEAR QUALITY SCORES CAME OUT OF SETTINGS on 2026-09-08, and that was a correctness fix
+             rather than a tidy-up: Settings has no library to click, so it fell back to an invisible
+             "management target" pointer nobody can see or choose, and an irreversible action was
+             clearing a library nobody had picked. The author: "There is no 'active root' - so what is
+             going on?" Here the library IS the click, like everything else in this menu.
+             data-ext hides it with no scorer installed; .popmenu button.hidden already does that. -->
+        <button id="libClearScores" data-act="clearscores" data-ext="quality" title="Clear this library&#39;s Quality scores (keeps images, tags &amp; favorites)">Clear Quality scores…</button>
+        <div class="popmenu-sep"></div>
+        <button data-act="modelsdir" title="Set this library's ComfyUI models folder (for Export-for-Civitai resource hashing)">Models folder…</button>
+        <button data-act="recyclefolder" title="Where this library's recycled files went — network drives have no Recycle Bin">Open recycle folder</button>
+        <button data-act="rename">Rename…</button>
+        <div class="popmenu-sep"></div>
+        <button data-act="delete" class="danger">Remove library…</button>
+      </div>
+
+      <!-- RESET IS ITS OWN ROW as of 2026-09-08, and the position is the whole point. The author:
+           "the issue is hierarchy on the page. putting it below snapshots makes it seem like it
+           doesn't apply to snapshots." It applies to more than snapshots — resetFilters clears every
+           filter, the SORT (sort and order are in serializeFilters), and detaches the loaded
+           snapshot. Sitting on the filter-tab row it was below two of the three.
+           WHY HERE AND NOT HIGHER. The author first proposed under the title area; that would put it above
+           the Libraries strip and so claim to reset which libraries are in scope, which it is
+           specified never to do (see THE FILTER SET — library visibility is scope, not a filter).
+           Same fault as "Clear ALL tags" claiming more than it did.
+           WHY NOT ON THE SNAPSHOTS ROW, which was my suggestion and was wrong: Snapshots can be
+           switched off in Settings, and it would have taken Reset with it.
+           So: below the one thing it does not touch, above everything it does. -->
+      <div class="reset-row full">
+        <button id="resetFilters" type="button" title="Clear every filter, the sort, and the loaded snapshot (X)" aria-label="Reset all" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5" /> <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" /></svg><span>Reset all</span></button>
+      </div>
+
+      <!-- A SECOND STRUCTURAL LINE, the author's call on 2026-09-08. It passes DESIGN.md's test the same
+           way #snapSep does, because there is a real boundary here: ABOVE it are the two controls
+           that act ON the rail — which libraries are in scope, and the button that clears
+           everything — and BELOW it is the rail's own state, the snapshot you have restored, the
+           sort, and the filters. The two lines nest rather than compete: this one says "controls,
+           then state", #snapSep says "the snapshot, then what it captures", and the scope narrows
+           going down.
+           IT IS NOT HIDDEN with anything. #snapSep goes when Snapshots does, because it marks that
+           section's edge; this one marks the edge of Reset and Libraries, which are always there.
+           Switch Snapshots off and the two lines collapse to this one, still in the right place. -->
+      <div class="rail-sep full" role="separator" aria-hidden="true"></div>
+
+      <!-- Snapshots — a named capture of the WHOLE filter state (filters, labels, tags and sort),
+           so it sits above everything it captures rather than among it. It is deliberately
+           LIBRARY-AGNOSTIC as of 2026-08-20: which libraries are ticked is scope, not a filter, so
+           a snapshot neither saves it nor moves it on restore (see the Libraries block above, and
+           _SNAP_LIST_KEYS in server.py for how the key is shed from snapshots already saved). The
+           label is the mode signal: "Snapshots" while you're just browsing, the snapshot's name
+           once one is restored. The ⋯ lives INSIDE the trigger, left of the chevron — the same
+           anatomy as the Model/Folder facet rows. The wrapper is deliberately NOT .facet-dd: the
+           facet wiring loop walks every .facet-dd and dereferences a .facet-search inside it,
+           which threw at load and blanked the entire app.
+           Snapshots stays the PARENT, but by BOUNDARY rather than by elevation: a full-bleed rule
+           under this row, and everything below it is what a snapshot captures. It used to be a
+           raised tray — lighter surface, lit top edge, cast shadow — which is three cues wrapped
+           around two ordinary controls where one pixel says the same thing. The claim that outlived
+           both shapes: position carries a hierarchy only while the things being ordered already
+           look different, which is why plain DOM order was not enough once Libraries collapsed
+           into a row of the same shape. That still holds now the two rows have swapped — the rule
+           under THIS row is what carries the hierarchy, and the strip above it is deliberately not
+           a peer: it holds no fields at all. -->
+      <!-- THE ROW GETS A CAP LABEL, 2026-09-08. The author: "weird to me that the libraries label is
+           less pronounced than the Snapshots one." He was reading two labels; there was only one.
+           "Snapshots" was the TRIGGER'S VALUE — a field whose resting text is its own name, which
+           is indistinguishable from a heading and outweighed the real cap label above it. Now the
+           name is in the label column like every other row, and the field says what is LOADED:
+           "None selected", or the snapshot's name. The mode signal survives the move — idle vs curating is
+           still legible, just in the value rather than in the name. -->
+      <!-- THE FIELD GETS ITS OWN LINE, under the label, with ＋ parked beside the label. The author's
+           layout, after the cap label cost the field the label column's width and a restored
+           snapshot truncated to one letter — "Golden hour portraits" had 28px to render in on a
+           300px rail. It reads as one letter and an ellipsis, which is how he found it.
+           This is BETTER than before the label existed, not merely a repair: the field now spans
+           the whole rail instead of sharing the line with ＋, so a long name has more room than it
+           ever had. The cost is one line of rail height, and the label line pays for itself by
+           carrying ＋. -->
+      <div class="snap-row full">
+        <label class="ctl-label snap-label" for="snapTrigger">Snapshots</label>
+        <div class="snap-dd" id="snapDD">
+          <div class="facet-trigger" id="snapTrigger" title="Snapshots — save and restore a whole filter set">
+          <!-- The layers glyph that stood here went on 2026-09-08. The author: "i don't think we need
+               an icon? it looks too much like sets anyway." Both true — the row carries a SNAPSHOTS
+               label now, so the mark was naming what the label already names, and the stacked-cards
+               silhouette is the set badge's, on a control that has nothing to do with sets. -->
+          <span class="facet-label" id="snapName">Snapshots</span>
+          <span id="snapDirty" class="snap-dirty hidden" title="Filters changed since this snapshot was restored">•</span>
+          <!-- Save/update lives INSIDE the field, next to the value it acts on, and is HIDDEN
+               rather than greyed when nothing is restored. That's a deliberate exception to the
+               disabled-not-hidden rule used elsewhere: this control is quiet by default and only
+               grows when a snapshot is loaded, and a permanently dead icon inside the field would
+               undo that. Hiding it costs no reflow either — the flexible name just takes the
+               space back. Not a camera: in an image browser that reads as "capture an image". -->
+          <button id="snapUpdate" class="facet-sortbtn snap-save hidden" type="button" title="Update this snapshot" aria-label="Update this snapshot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" /> <path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7" /> <path d="M7 3v4a1 1 0 0 0 1 1h7" /></svg></button>
+          <span class="facet-caret" aria-hidden="true"></span>
+        </div>
+        <div id="snapMenu" class="popmenu hidden"></div>
+        <div id="snapActions" class="popmenu hidden">
+          <button data-act="rename">Rename…</button>
+          <div class="popmenu-sep"></div>
+          <button data-act="delete" class="danger">Delete snapshot…</button>
+        </div>
+        </div>
+        <!-- Same + as Add library: the same verb at a different scope, so no new vocabulary.
+             It stood in a .rail-cluster with a pipe and Reset until 2026-08-20, when Reset moved to
+             the Libraries band. A RULE ONLY MEANS ANYTHING BETWEEN TWO CONTROLS, so the pipe went
+             with it rather than being left to separate this button from the row's edge — and the
+             cluster with the pipe, since its whole job was keeping the two from being split across
+             a wrap. -->
+        <button id="snapNew" class="icon-btn at-field" type="button" title="New snapshot" aria-label="New snapshot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14" /> <path d="M12 5v14" /></svg></button>
+      </div>
+
+      <!-- The rail's one structural line: Snapshots above, everything a snapshot captures below.
+           Full-bleed like the tray it replaces, so it reaches both edges of the rail. -->
+      <!-- This rule is what makes Snapshots read as the parent of everything below it, so it is
+           hidden WITH the row (see applyShowSnapshots) — a boundary marking the edge of a section
+           that is not on screen marks nothing. -->
+      <div class="rail-sep full" id="snapSep" role="separator" aria-hidden="true"></div>
+
+      <label class="ctl-label" for="sort">Sort</label>
+      <!-- The dice sits beside Sort and is ALWAYS drawn — the one deliberate exemption from the
+           rail's "a control is drawn when it is doing something" rule. It is an action, not a
+           filter: Random is used often enough to deserve one click rather than a trip through the
+           dropdown, and a button that appears only once you have already arrived cannot be the way
+           you get there. It still does its original job too — re-picking an option a <select>
+           already holds fires no event at all, so this is the only way to ask for a second shuffle
+           without touching an unrelated filter.
+           Grouped: when it was made / chance / how good it is / how big it is.
+           SEPARATORS ARE DISABLED OPTIONS, NOT <hr>. <hr> was tried first and lost twice: it took
+           the browser's own light-mode rule colour and rendered near-black on this dark rail, and
+           it stayed wrong after both an explicit colour and a page-wide color-scheme, because the
+           popup is drawn by the browser and will not take our styles inside it. A line made of
+           BOX-DRAWING CHARACTERS needs no styling to be correct — it is option text, so it arrives
+           in whatever colour already makes the other rows readable, in any browser and either
+           theme. Disabled, so it cannot be picked and keyboard navigation steps over it. -->
+      <div class="sort-row">
+        <select id="sort" class="quiet-field" title="Sort">
+          <option value="date">Newest</option>
+          <option value="date-asc">Oldest</option>
+          <option disabled>──────────────</option>
+          <option value="random">Random</option>
+          <option disabled data-ext="quality">──────────────</option>
+          <option value="reward-desc" data-ext="quality">Quality: High to Low</option>
+          <option value="reward-asc" data-ext="quality">Quality: Low to High</option>
+          <option disabled>──────────────</option>
+          <option value="size-desc">Largest</option>
+        </select>
+        <button id="reshuffle" class="icon-btn at-field" type="button" title="Shuffle again" aria-label="Shuffle again"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="12" height="12" x="2" y="10" rx="2" ry="2" /> <path d="m17.92 14 3.5-3.5a2.24 2.24 0 0 0 0-3l-5-4.92a2.24 2.24 0 0 0-3 0L10 6" /> <path d="M6 18h.01" /> <path d="M10 14h.01" /> <path d="M15 6h.01" /> <path d="M18 9h.01" /></svg></button>
+      </div>
+
+      <!-- No divider above the tabs. It drew a boundary where there isn't one: SORT is governed by
+           a snapshot exactly as the filter panes are — "Reset clears exactly what a snapshot saves"
+           is the same rule that makes changing the SORT enable Reset. A rule here said "filters
+           start below", which contradicts that. (Libraries used to carry half this argument too;
+           it no longer does, having left the filter set on 2026-08-20 — but Sort alone still
+           settles it, so the rule stays deleted for a narrower reason than before.) Everything from .rail-sep down to the
+           viewport bar is one body. Note the rail's other two dividers pass the same test that
+           deleted this one: .rail-sep has a snapshot's whole payload below it and nothing above,
+           and the viewport bar's own line has grid size and back-to-top, which aren't captured. -->
+      <div class="filter-tabs full">
+        <button class="ftab active" type="button" data-tab="filters">Filters<span class="ftab-badge hidden">0</span></button>
+        <button class="ftab" type="button" data-tab="labels">Labels<span class="ftab-badge hidden">0</span></button>
+        <button class="ftab" type="button" data-tab="tags">Tags<span class="ftab-badge hidden">0</span></button>
+      </div>
+
+      <div class="tabpane" data-pane="filters">
+      <label class="ctl-label" for="q">Include</label>
+      <div id="searchbox" class="searchbox quiet-field">
+        <input id="q" type="text" placeholder="Search term + Enter" autocomplete="off">
+        <button id="qEnter" class="qenter hidden" tabindex="-1" title="Add this as a search term (Enter)" aria-label="Add this as a search term"></button>
+        <button id="qclear" class="qclear hidden" title="Clear search"></button>
+      </div>
+      <div id="chips" class="chips-row full"></div>
+
+      <label class="ctl-label" for="xq">Exclude</label>
+      <div id="xsearchbox" class="searchbox exclude quiet-field">
+        <input id="xq" type="text" placeholder="Search term + Enter" autocomplete="off">
+        <button id="xqEnter" class="qenter hidden" tabindex="-1" title="Add this as an excluded term (Enter)" aria-label="Add this as an excluded term"></button>
+        <button id="xqclear" class="qclear hidden" title="Clear exclude"></button>
+      </div>
+      <div id="xchips" class="chips-row full"></div>
+
+      <!-- WHAT YOU TYPED, then WHAT THE FILE SAYS. Everything above this line is words you supply;
+           everything below it to the next line is read off the file itself. -->
+      <div class="pane-sep full" role="separator" aria-hidden="true"></div>
+
+      <label class="ctl-label" for="mfolder">Model type</label>
+      <select id="mfolder" class="quiet-field" title="Filter by the model's top-level folder (Illustrious / Pony / SDXL / Flux …)">
+        <option value="">All model types</option>
+      </select>
+
+      <label class="ctl-label">Model</label>
+      <div class="facet-dd" id="modelDD" data-facet="model">
+        <div class="facet-trigger quiet-field" title="Filter by model">
+          <span class="facet-label">All models</span>
+          <button class="facet-sortbtn" type="button" title="Sort options" aria-haspopup="true"></button>
+          <span class="facet-caret" aria-hidden="true"></span>
+        </div>
+        <div class="facet-sortmenu popmenu hidden">
+          <button type="button" data-sort="count">Sort by count</button>
+          <button type="button" data-sort="name">Sort A-Z</button>
+        </div>
+        <div class="facet-panel popmenu hidden">
+          <input class="facet-search" type="text" placeholder="search…" autocomplete="off">
+          <div class="facet-list"></div>
+        </div>
+      </div>
+
+      <label class="ctl-label">Folder</label>
+      <div class="facet-dd" id="folderDD" data-facet="folder">
+        <div class="facet-trigger quiet-field" title="Filter by folder">
+          <span class="facet-label">All folders</span>
+          <button class="facet-sortbtn" type="button" title="Sort options" aria-haspopup="true"></button>
+          <span class="facet-caret" aria-hidden="true"></span>
+        </div>
+        <div class="facet-sortmenu popmenu hidden">
+          <button type="button" data-sort="count">Sort by count</button>
+          <button type="button" data-sort="name">Sort A-Z</button>
+        </div>
+        <div class="facet-panel popmenu hidden">
+          <input class="facet-search" type="text" placeholder="search…" autocomplete="off">
+          <div class="facet-list"></div>
+        </div>
+      </div>
+
+      <label class="ctl-label">File type</label>
+      <div id="mediaType" class="icon-seg at-default" role="group" aria-label="File type">
+        <button type="button" data-type="" title="All" aria-label="All" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2h-4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8" /> <path d="M16.706 2.706A2.4 2.4 0 0 0 15 2v5a1 1 0 0 0 1 1h5a2.4 2.4 0 0 0-.706-1.706z" /> <path d="M5 7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 1.732-1" /></svg></button>
+        <button type="button" data-type="image" title="Images" aria-label="Images" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /> <circle cx="9" cy="9" r="2" /> <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /></svg></button>
+        <button type="button" data-type="video" title="Videos" aria-label="Videos" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5" /> <rect x="2" y="6" width="14" height="12" rx="2" /></svg></button>
+        <button type="button" data-type="audio" title="Songs" aria-label="Songs" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="18" r="3" /> <circle cx="18" cy="16" r="3" /> <path d="M9 18V5l12-2v13" /></svg></button>
+      </div>
+
+      <label class="ctl-label" title="Collapse sets into one card — video sets (a still+video sharing a filename) and/or image sets (stills from one generation, e.g. …1 MAIN / 2 DET / 3 REFINE)">Sets</label>
+      <div id="setsMode" class="icon-seg at-default" role="group" aria-label="Sets">
+        <button type="button" data-mode="all" title="All" aria-label="All" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2h-4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8" /> <path d="M16.706 2.706A2.4 2.4 0 0 0 15 2v5a1 1 0 0 0 1 1h5a2.4 2.4 0 0 0-.706-1.706z" /> <path d="M5 7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 1.732-1" /></svg></button>
+        <button type="button" data-mode="images" title="Image" aria-label="Image sets only" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /> <circle cx="9" cy="9" r="2" /> <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /></svg></button>
+        <button type="button" data-mode="video" title="Video" aria-label="Video sets only" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5" /> <rect x="2" y="6" width="14" height="12" rx="2" /></svg></button>
+        <button type="button" data-mode="none" title="No sets" aria-label="No sets — every file its own card" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18" /> <path d="M3 12h18" /> <rect x="3" y="3" width="18" height="18" rx="2" /></svg></button>
+      </div>
+
+      <!-- WHAT A CARD IS, then WHEN IT WAS MADE. Model, folder, file type and Sets all answer the
+           first question; the date pair is the only thing below that answers the second. -->
+      <div class="pane-sep full" role="separator" aria-hidden="true"></div>
+
+      <!-- One input per row: side by side they squeeze to ~22px in a narrow sidebar, which hides
+           the date entirely. Stacked, each gets the full value column. -->
+      <label class="ctl-label" for="dfrom">From date</label>
+      <div class="score-range date-range">
+        <input type="date" id="dfrom" class="quiet-field" title="From date — file date, inclusive (blank = no lower bound)">
+        <button id="dfromClear" class="qclear hidden" data-clear="dfrom" title="Clear the From date" aria-label="Clear the From date"></button>
+      </div>
+      <label class="ctl-label" for="dto">To date</label>
+      <div class="score-range date-range">
+        <input type="date" id="dto" class="quiet-field" title="To date — file date, inclusive (blank = no upper bound)">
+        <button id="dtoClear" class="qclear hidden" data-clear="dto" title="Clear the To date" aria-label="Clear the To date"></button>
+      </div>
+
+      <!-- THE LAST GROUP IS THE ODDMENTS: two narrow yes/no-ish filters that belong to no family
+           above. Quality is LAST because it is the only filter that can be absent — its extension
+           can be switched off, and a group whose members come and go belongs at the end, where its
+           going leaves no hole in the middle of the pane. -->
+      <div class="pane-sep full" role="separator" aria-hidden="true"></div>
+
+      <label class="ctl-label" for="hasNote">Notes</label>
+      <label class="filter-check label-row">
+        <input type="checkbox" id="hasNote" title="Show only images that have a note"> Has notes
+      </label>
+
+      <label class="ctl-label" data-ext="quality">Quality</label>
+      <div class="score-range" data-ext="quality">
+        <select id="rmin" class="quiet-field" title="Minimum quality score (1-10) — scored images only"><option value="">-</option></select>
+        <span>to</span>
+        <select id="rmax" class="quiet-field" title="Maximum quality score (1-10) — scored images only"><option value="">-</option></select>
+      </div>
+
+      </div>
+
+      <div class="tabpane" data-pane="labels">
+        <div id="labelList" class="label-list full"></div>
+      </div>
+
+      <div class="tabpane" data-pane="tags">
+        <div class="tags-box full">
+          <input id="tagSearch" type="text" placeholder="search, or type + Enter to tag selection" autocomplete="off">
+          <div id="taglist" class="taglist"></div>
+        </div>
+      </div>
+
+      <!-- Viewport controls, anchored at the foot of the rail: grid size and back-to-top. Neither
+           is a filter — they change how you look at the results, not which results. Sticky, never a
+           floating overlay: it reserves real layout space, so a short window can't leave it sitting
+           on top of the controls above. -->
+      <div class="viewport-row">
+        <div id="cardSize" class="size-seg" role="group" aria-label="Grid card size">
+          <button type="button" data-size="128" title="Small cards (crisp 3× thumbnail)">S</button>
+          <button type="button" data-size="192" title="Medium cards (crisp 2× thumbnail)">M</button>
+          <button type="button" data-size="256" title="Large cards">L</button>
+          <button type="button" data-size="512" title="Extra-large cards (2× L; thumbnail upscaled)">XL</button>
+        </div>
+        <button id="backTop" class="icon-btn" type="button" title="Back to top" aria-label="Back to top" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 11-5-5-5 5" /> <path d="m17 18-5-5-5 5" /></svg>
+        </button>
+      </div>
+    </aside>
+
+    <div id="resizer" class="resizer" title="Drag to resize the sidebar"></div>
+
+    <div id="content">
+      <!-- Always present, never hidden. Two reasons (the author, 2026-08-17): it is the only thing that
+           teaches selection mode exists, and showing it on the first tick shoved the whole grid
+           down. Idle buttons dim rather than disappear — see updateSelBar. -->
+      <div id="selbar" class="selbar">
+        <span id="selCount">0 selected</span>
+        <button id="selAll">Select all</button>
+        <button id="selClear">Clear</button>
+        <span class="selbar-actions">
+          <button id="selTag" class="has-ico" title="Add a tag to the selected images">Tag</button>
+          <button id="selFav" class="has-ico" title="Favorite the selected images">Favorite</button>
+          <!-- The occasional three sit behind a ⋯, the same idiom the detail view's action bar
+               uses: the bar holds what you reach for while culling, the menu holds the rest. Also
+               buys back the width that made an always-visible bar wrap on a narrow window (DS-9). -->
+          <span class="sel-more">
+            <button id="selMore" title="More actions" aria-label="More actions" aria-haspopup="true" aria-expanded="false">⋯</button>
+            <div id="selMoreMenu" class="popmenu hidden">
+              <!-- A VERB, like everything either side of it. "Quality" alone named the subject and
+                   left the menu to imply the action, which is the one thing a menu item must not
+                   do — its neighbours are Rename and "Tag with …". -->
+              <button id="selReward" data-ext="quality" title="Score the selected images with the pyiqa quality metric">Get quality scores</button>
+              <!-- One button per installed tagger, built by renderExtMenu(). Authored empty for
+                   the same reason the detail view's menu is: what is here depends on what is
+                   installed, which this file cannot know. -->
+              <span id="selExtActions"></span>
+              <button id="selRename" title="Find & replace in the selected filenames">Rename</button>
+            </div>
+          </span>
+          <button id="selDelete" class="danger has-ico" title="Recycle the selected files">Recycle</button>
+        </span>
+      </div>
+      <div id="gridBusy" class="pane-busy hidden" role="status" aria-live="polite" aria-label="Loading"><span class="spinner"></span></div>
+      <main id="grid" class="grid"></main>
+      <!-- QUIET tier: loading the next page appends to what's already there, so it gets a small
+           in-flow spinner under the grid — no scrim, nothing blocked, nothing hidden. -->
+      <div id="moreBusy" class="more-busy hidden" role="status" aria-live="polite" aria-label="Loading more"><span class="spinner"></span></div>
+      <div id="sentinel"></div>
+    </div>
+  </div>
+  <div id="status" class="status">
+    <div class="status-line">
+      <span id="statusText">Indexing…</span>
+      <button id="undoDelete" class="stop undo" style="display:none">Undo</button>
+      <button id="stopScan" class="stop">Stop</button>
+    </div>
+    <div class="pbar"><div id="pbarFill"></div></div>
+  </div>
+
+  <!-- first-run / change-folder setup -->
+  <div id="setup" class="overlay hidden">
+    <div class="overlay-bg"></div>
+    <div class="setup-box">
+      <!-- NAMED FOR THE COMMAND THAT OPENS IT ("Add library…" in the Libraries menu), minus the
+           ellipsis: the dots mean "this opens a dialog", and you are already in it. The folder
+           emoji went with the rename — no other heading in the app wears one, and the box below
+           says "folder" three times without help. -->
+      <h2>Add library</h2>
+      <!-- OVERWRITTEN ON EVERY OPEN by openAddRoot, so this static copy exists only to keep the
+           markup honest to a reader — it is a copy of the one string there, not a variant. It used
+           to carry the ONLY mention of Browse and of UNC paths anywhere in the app, and nobody ever
+           saw either: the overwrite happens before the box is shown. Both facts now live in what
+           actually renders. -->
+      <p id="setupMsg">Enter the full path to a folder containing image, video or audio files.
+        All files and subfolders are indexed.</p>
+      <!-- BOTH FIELDS ARE LABELLED, and the path one gained its label when the name field arrived:
+           a labelled field beside a bare one reads as something bolted on. .ctl-label is the app's
+           one cap-label spec — see DESIGN.md — so these match the sidebar rather than inventing a
+           second look. `for=` because these are real labels: clicking one focuses its field. -->
+      <label class="ctl-label" for="setupPath">Folder path</label>
+      <div class="setup-path-row">
+        <!-- A GENERIC EXAMPLE. It read "C:\ComfyUI\output" until 2026-09-07, from when this only
+             indexed one app's output — the placeholder's job is to show the SHAPE of a path. -->
+        <input id="setupPath" type="text" spellcheck="false" placeholder="e.g. D:\Images\Renders">
+        <button id="setupBrowse" class="secondary" type="button">Browse…</button>
+      </div>
+      <!-- Filled by openAddRoot. Under the FIELD, not with the instruction above it: it is about
+           what you may type in, not about what the dialog is for. -->
+      <div id="setupHint" class="setup-hint"></div>
+      <!-- OPTIONAL, and blank is the normal case: a library with no name takes the folder's own
+           (server: _default_name). The field is an override, not a step — which is why it sits
+           BELOW the path and its hint rather than between them, and why nothing pre-fills it. -->
+      <label class="ctl-label" for="setupName">Library name</label>
+      <input id="setupName" type="text" spellcheck="false"
+             placeholder="Optional custom name for this library">
+      <div id="setupError" class="setup-error"></div>
+      <div class="setup-actions">
+        <button id="setupGo" class="primary">Start indexing</button>
+        <button id="setupCancel" class="ghost">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shown once, when a first library has finished indexing. It SIGNPOSTS rather than teaches:
+       the ? is where everything a new user needs already lives, and a pop-up that tried to hold it
+       would be dismissed unread. The ⟨?⟩ in the sentence is the live glyph, inert. -->
+  <div id="helpHint" class="overlay hidden">
+    <div class="overlay-bg"></div>
+    <div class="setup-box">
+      <h2>Check out the Help</h2>
+      <p id="helpHintMsg"></p>
+      <!-- THE ONLY TIME THE APP ASKS ABOUT ITS ONE OUTBOUND REQUEST, and it rides in the pop-up
+           that was already interrupting rather than earning a second one. The author's call, and his
+           words for why: "we can make a quick hit and not a major impact to UX."
+           Pre-ticked, because the honest default for "would you like to be told" is yes — and the
+           sentence says exactly what goes out, so a tick is informed rather than assumed. Settings
+           has the same switch afterwards. -->
+      <label class="hint-check"><input type="checkbox" id="helpHintUpdates" checked> Tell me when a
+        new version is available</label>
+      <p class="set-help">Checks this app's GitHub page at startup. Nothing about you or your
+        library is sent, and it never downloads or installs anything.</p>
+      <div class="setup-actions">
+        <button id="helpHintGo" class="primary">Open Help</button>
+        <button id="helpHintClose" class="ghost">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- What the amber arrow opens. It NAMES GITHUB and shows the release notes, which is the half
+       of the story the icon cannot carry — an icon can say "there is something", never "there is
+       1.4, and here is what changed".
+       NO DOWNLOAD BUTTON, deliberately: the link goes to the release page and the person decides.
+       This app updates by replacing a folder, and a program that rewrites itself while running is
+       a class of problem worth not having at all. -->
+  <div id="updateBox" class="overlay hidden">
+    <div class="overlay-bg"></div>
+    <div class="setup-box">
+      <h2 id="updateTitle">A new version is available</h2>
+      <p id="updateSub" class="set-help"></p>
+      <!-- The notes are the release's own text, rendered by the same markdown the Help window
+           uses — which escapes before it builds any HTML, and that matters here because this is
+           the one string in the app that comes off the internet. -->
+      <div id="updateNotes" class="update-notes"></div>
+      <div class="setup-actions">
+        <!-- A BUTTON, not a link wearing a button's clothes: `.primary` is scoped to `button` in
+             style.css, so an <a> here would be the one unstyled control in the app. It opens the
+             same URL the same way. -->
+        <button id="updateLink" class="primary">Open the release page</button>
+        <button id="updateClose" class="ghost">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- THE APP BEHIND THIS WINDOW IS GONE. Every control here starts by asking the server something,
+       so once it stops they all fail the same silent way -- Settings opens by fetching your settings
+       and simply never opens if that throws. This says so once, instead of leaving a window full of
+       dead buttons. NOT DISMISSIBLE, and that is the point: there is nothing behind it to go back
+       to. Highest layer in the app, above Help (62), because it outranks whatever it lands on. -->
+  <div id="gone" class="overlay hidden">
+    <div class="overlay-bg"></div>
+    <div class="setup-box">
+      <h2 id="goneTitle">VV Curator has stopped</h2>
+      <p id="goneMsg"></p>
+      <div class="setup-actions">
+        <button id="goneClose" class="primary">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- bulk rename (find & replace) -->
+  <div id="rename" class="overlay hidden">
+    <div class="overlay-bg"></div>
+    <div class="rename-box">
+      <h2>Rename selected files</h2>
+      <p class="rename-sub">Find &amp; replace in the filenames. Preview updates as you type; nothing changes until you click Rename.</p>
+      <div class="rename-fields">
+        <label>Find<input id="rnFind" spellcheck="false" autocomplete="off"></label>
+        <label>Replace with<input id="rnReplace" spellcheck="false" autocomplete="off"></label>
+      </div>
+      <div id="rnSummary" class="rename-summary"></div>
+      <div id="rnPreview" class="rn-preview"></div>
+      <div class="rename-actions">
+        <button id="rnApply" class="primary" disabled>Rename</button>
+        <button id="rnCancel" class="ghost">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- app settings (sectioned) -->
+  <div id="settings" class="overlay hidden">
+    <div class="overlay-bg"></div>
+    <div class="settings-box">
+      <div class="settings-head">
+        <h2>Settings</h2>
+        <div class="settings-head-actions">
+          <button id="settingsHelp" class="icon-btn" type="button" title="Help for these settings" aria-label="Help for these settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /></svg></button>
+          <button class="close" aria-label="Close" title="Close (Esc)" id="settingsClose"></button>
+        </div>
+      </div>
+      <div class="settings-body">
+        <nav class="settings-nav">
+          <button class="settings-tab active" data-sec="general">General</button>
+          <button class="settings-tab" data-sec="miner">Miner</button>
+          <button class="settings-tab" data-sec="cards">Cards</button>
+          <button class="settings-tab" data-sec="appearance">Appearance</button>
+          <button class="settings-tab" data-sec="extensions">Extensions</button>
+        </nav>
+        <div class="settings-panels">
+          <!-- FOUR HEADINGS, and the reason is a fault this panel had rather than a taste for
+               structure. "Recycling" was the ONLY heading in Settings, and a heading claims
+               everything after it until another one says otherwise -- so Find duplicates, the debug
+               trace and both Clear buttons read as part of Recycling, filing two irreversible
+               actions under a heading with nothing to do with them. A half-applied structure is
+               worse than none: it actively misfiles things.
+               MAINTENANCE is the other half of the fix. Rows 1-5 are settings you set and leave;
+               the last four are OPERATIONS you press, twice with no undo, and they looked identical
+               in one flat list. The author's call 2026-09-08: a heading here, not a sixth tab -- the
+               fault was the missing heading, not the location, and Cards/Appearance/Extensions are
+               already thin enough without another rarely-visited tab beside them.
+               ONE ROW ANATOMY THROUGHOUT: short title, descriptor line, control. Every long title
+               here was a title with a SCOPE crammed into it -- "(all libraries)", "(active
+               library)", "(active root)", "(global default)" -- and the descriptor is where scope
+               belongs. Checkboxes keep their inline label, which is the standard and not worth
+               fighting. -->
+          <section class="settings-panel" data-sec="general">
+            <div class="group-title">Viewing</div>
+            <div class="set-row set-check">
+              <label><input type="checkbox" id="setAutoplay"> Autoplay videos</label>
+            </div>
+            <div class="set-row set-check">
+              <label><input type="checkbox" id="setShowSnapshots"> Show Snapshots</label>
+              <!-- The author's wording, 2026-09-08. The first version described what UNCHECKING does
+                   ("Hides the Snapshots row…") on a setting called Show Snapshots that ships
+                   checked — so it read backwards against its own label. This says what the feature
+                   IS first, which the old one never did, and it has to: someone who does not use
+                   Snapshots is exactly the person reading this, and "hides the Snapshots row" tells
+                   them nothing about what they would be giving up.
+                   The last clause is mine and is not decoration: "disable" reads as destructive
+                   beside something you have invested named filter sets in. -->
+              <p class="set-help">Snapshots are saved filter combinations with your custom names.
+                Uncheck to disable and hide this feature from the main sidebar. Your saved
+                snapshots are kept.</p>
+            </div>
+            <div class="set-row">
+              <label for="setKeepBehavior">Keep behavior</label>
+              <select id="setKeepBehavior">
+                <option value="next">Next card</option>
+                <option value="stay">Stay on card</option>
+              </select>
+              <p class="set-help">Where the detail view goes after you keep one image from a set.</p>
+            </div>
+
+            <div class="group-title">ComfyUI</div>
+            <div class="set-row">
+              <label for="setModelsDir">Models folder</label>
+              <input type="text" id="setModelsDir" placeholder="e.g. D:\ComfyUI\models" spellcheck="false">
+              <span id="setModelsDirStatus" class="set-test"></span>
+              <p class="set-help">The default for every library. Lets <b>Export for Civitai</b> hash
+                your checkpoints and LoRAs so Civitai links them; blank exports prompts and settings
+                only.</p>
+            </div>
+
+            <!-- RECYCLING. Confirm-before sat mid-list until 2026-08-28; grouping it with the
+                 folder reminder is the point of the header, since both are about the same thing
+                 happening to the same files. .group-title is the sidebar's section header, reused
+                 rather than restyled — it already carries the top rule and the caps.
+                 THE BLURB IS THE ONE SECTION THAT GETS ONE (the author, 2026-09-08): this is the only
+                 place in the app where files leave, and the heading named the feature without ever
+                 saying what it does. Shaped like Miner's intro paragraph, which is the precedent. -->
+            <div class="group-title">Recycling</div>
+            <!-- IT SAID "Recycling never deletes" until 2026-09-11. The author: "that may be misleading.
+                 It DOES do what Windows does for local drives." He is right, and the code agrees with
+                 him — api_dupes_cull batches its work precisely because Windows silently purges the
+                 oldest bin contents once a drive's quota is exceeded. The app never deletes; Windows
+                 can. Comparing it to File Explorer carries the reassurance without the over-claim,
+                 because everyone already knows what a file in the Recycle Bin is worth. -->
+            <p class="set-help">Recycling does what deleting in File Explorer does: files go to the
+              Windows Recycle Bin, and stay there until it is emptied. On a network drive, where
+              Windows has no bin, they go to a <code>_ToRecycle</code> folder beside the library
+              instead. <button type="button" class="link" id="helpRecycling">More in Help</button></p>
+            <div class="set-row set-check">
+              <label><input type="checkbox" id="setConfirmRecycle"> Confirm before recycling</label>
+              <p class="set-help">Actions reaching other folders or libraries always ask.</p>
+            </div>
+            <div class="set-row set-check">
+              <label><input type="checkbox" id="setRecycleWarn"> Enable recycle reminder</label>
+              <p class="set-help">Triggers a toast message if either limit below is reached, then resets.</p>
+            </div>
+            <!-- .set-sub, not a plain row: these belong to the checkbox above, so they are indented
+                 under it and the panel's between-rows rule is cancelled. Gated by it too — with the
+                 reminder off they are dimmed rather than left live and doing nothing.
+                 Stacked rather than columned: the fields are only as wide as their content, so
+                 columns sized to the panel left the second one stranded mid-panel. -->
+            <div class="set-sub" id="setRecycleNums">
+              <div class="set-row">
+                <label for="setRecycleFiles">File limit</label>
+                <input type="number" id="setRecycleFiles" min="50" max="100000" step="10">
+                <p class="set-help">Range: 50–100,000</p>
+              </div>
+              <div class="set-row">
+                <label for="setRecycleGb">Size limit (GB)</label>
+                <input type="number" id="setRecycleGb" min="0.1" max="500" step="0.1">
+                <p class="set-help">Range: 0.1–500</p>
+              </div>
+            </div>
+
+            <div class="group-title">Maintenance</div>
+            <!-- FIRST IN MAINTENANCE, not under Viewing: this is about the app itself rather than
+                 about the images, and it is the one row here that is a setting rather than an
+                 operation you press. It sits above the two irreversible buttons on purpose. -->
+            <div class="set-row set-check">
+              <label><input type="checkbox" id="setUpdateCheck"> Tell me when a new version is available</label>
+              <p class="set-help">Checks this app's GitHub page at startup and marks the sidebar if
+                there is a newer release. Nothing about you or your library is sent, and it never
+                downloads or installs anything.</p>
+            </div>
+            <div class="set-row">
+              <label>Duplicate files</label>
+              <p class="set-help">Across every library. Matches on filename, size and date; tags and
+                labels move to the copy you keep.</p>
+              <div class="set-inline">
+                <button id="findDupes" class="ghost">Find duplicates…</button>
+              </div>
+            </div>
+            <div class="set-row set-check">
+              <label><input type="checkbox" id="setTrace"> Record a debug trace</label>
+              <p class="set-help">Records searches, timings and grid rebuilds; nothing leaves your
+                machine.</p>
+              <div class="set-inline">
+                <button id="showTrace" class="ghost">Show trace…</button>
+              </div>
+            </div>
+          </section>
+          <section class="settings-panel hidden" data-sec="miner">
+            <p class="set-help"><b>Scan for tags</b> reads your positive prompts, folder names and
+              file names, then suggests tags from what it finds — ranked by how many images each
+              appears in. These settings control what it considers a candidate.</p>
+            <div class="set-grid">
+              <div class="set-row">
+                <label for="setMinerMinCount">Minimum images</label>
+                <input type="number" id="setMinerMinCount" min="1">
+                <p class="set-help">A candidate must appear in at least this many images to be shown.</p>
+              </div>
+              <div class="set-row">
+                <label for="setMinerMaxCand">Max candidates</label>
+                <input type="number" id="setMinerMaxCand" min="10">
+                <p class="set-help">Cap on how many candidates the review list shows.</p>
+              </div>
+              <div class="set-row">
+                <label for="setMinerMinWord">Min word length</label>
+                <input type="number" id="setMinerMinWord" min="1">
+                <p class="set-help">Ignore word / filename tokens shorter than this.</p>
+              </div>
+              <div class="set-row">
+                <label for="setMinerMaxPhrase">Max phrase words</label>
+                <input type="number" id="setMinerMaxPhrase" min="1">
+                <p class="set-help">Comma-phrases longer than this are treated as sentences (mined by word/bigram instead).</p>
+              </div>
+            </div>
+            <div class="set-row set-check">
+              <label>Read from</label>
+              <div class="set-inline">
+                <label><input type="checkbox" id="setMinerSrcPrompt"> Prompts</label>
+                <label><input type="checkbox" id="setMinerSrcFolder"> Folders</label>
+                <label><input type="checkbox" id="setMinerSrcFilename"> Filenames</label>
+              </div>
+              <p class="set-help">Filenames are the noisiest source (counters, hashes) — turn off if unhelpful.</p>
+            </div>
+            <div class="set-row">
+              <label for="setMinerStoplist">Stoplist (one per line)</label>
+              <textarea id="setMinerStoplist" rows="6" spellcheck="false"
+                placeholder="masterpiece&#10;best quality&#10;…"></textarea>
+              <p class="set-help">Boilerplate phrases to never surface as tags. Merged with a built-in
+                list of common English words.</p>
+            </div>
+          </section>
+          <section class="settings-panel hidden" data-sec="appearance">
+            <div class="set-row">
+              <label>Theme presets</label>
+              <div class="set-inline">
+                <button id="themeDark" class="secondary">Dark</button>
+                <button id="themeLight" class="secondary">Light</button>
+                <button id="themeReset" class="ghost">Reset to defaults</button>
+              </div>
+            </div>
+            <div class="set-row">
+              <label>Colors</label>
+              <p class="set-help">Live preview as you edit. <b>Save</b> keeps your theme; closing without
+                saving discards changes. Colors are stored per install (config.json).</p>
+              <div id="themeRows" class="theme-rows"></div>
+            </div>
+          </section>
+          <!-- Cards: what the small print on a grid card says, and in what order. The rows are
+               built by renderCardFactRows() from the same CARD_FACTS table the grid renders from,
+               so this panel cannot list a fact the card can't draw. -->
+          <!-- Extensions: the optional, heavy, out-of-process features. Rows are built by
+               renderExtRows() from /api/extensions, so this panel can only list what is actually
+               on disk - there is no hard-coded entry, including for the Quality scorer. -->
+          <section class="settings-panel hidden" data-sec="extensions">
+            <div class="set-row">
+              <label>Installed extensions</label>
+              <p class="set-help">Each one runs on its own, outside the app, and adds its own
+                controls. Switching one off hides its controls; anything it has already worked out
+                is kept. <b>Re-run setup</b> stays available on a working one — it repairs an
+                install rather than starting over, and never re-downloads what is already there.</p>
+              <div id="extRows" class="ext-rows"></div>
+            </div>
+          </section>
+          <section class="settings-panel hidden" data-sec="cards">
+            <div>
+              <label>Card details</label>
+              <p class="set-help">Shown on Large and Extra-large cards. Order applies top to bottom.</p>
+              <div id="cardFactRows" class="fact-rows"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+      <div class="settings-foot">
+        <span id="setStatus" class="set-status"></span>
+        <span class="settings-foot-actions">
+          <button id="setSave" class="primary">Save</button>
+          <button id="settingsCancel" class="ghost">Cancel</button>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Help: the user guide and the reference, rendered from the same markdown files that ship in
+       docs/. There is no second copy of this text — the window IS the doc, so the two cannot drift.
+       z-index sits above #settings because Help opens FROM Settings and must land on top of it. -->
+  <div id="help" class="overlay hidden">
+    <div class="overlay-bg"></div>
+    <div class="help-box">
+      <div class="help-head">
+        <h2>Help</h2>
+        <button class="close" aria-label="Close" title="Close (Esc)" id="helpClose"></button>
+      </div>
+      <div class="help-body">
+        <!-- The contents list, and under it the one thing the window cannot show you: Ctrl+F.
+             A Filter box sat above the list and searched HEADINGS only, so looking up a word that
+             appears 25 times in the text and in no heading returned nothing. Ctrl+F does the real
+             job here — the whole document is in the page at once, so it finds and highlights every
+             match — and it has no affordance, which is what this line is for. -->
+        <nav class="help-nav">
+          <div id="helpToc" class="help-toc"></div>
+          <p class="hint help-find">Press Ctrl+F to search this window.</p>
+        </nav>
+        <div id="helpDoc" class="help-doc" tabindex="0"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Folder actions for the image open in the detail view; positioned by JS like #libMenu.
+       MUST live outside #sidebar: that is position:sticky, which always creates a stacking context,
+       so a menu nested inside it can't paint above the detail overlay no matter how high its
+       z-index. (#libMenu gets away with it only because it never opens while the detail is up.) -->
+  <!-- The detail view's Extensions menu; its items are rendered from what is installed, never
+       authored here. A SIBLING OF #folderMenu, at body level, and that placement is the whole
+       point: it first sat next to #libMenu inside <aside id="sidebar">, which is position:sticky
+       and therefore its own stacking context — so z-index 80 meant 80 WITHIN THE SIDEBAR, the
+       menu drew perfectly over the detail overlay, and every click went to the pane behind it. -->
+  <div id="extMenu" class="popmenu hidden"></div>
+
+  <div id="folderMenu" class="popmenu hidden">
+    <button data-act="setfilter" title="Set the sidebar Folder filter to this folder and show the grid">Set filter</button>
+    <button data-act="dupes" class="danger" title="Recycle copies of this folder's files that sit in other folders">Delete copies…</button>
+  </div>
+
+  <!-- detail overlay -->
+  <div id="overlay" class="overlay hidden">
+    <div class="overlay-bg"></div>
+    <div class="detail">
+      <!-- The size control sits LEFT of the close, the order every window title bar uses: the left
+           one steps back a level, the right one leaves entirely — and Escape walks the pair left to
+           right. It is the ENTRY point as well as the exit, so the mode is findable without already
+           knowing the `f` key. -->
+      <button class="close maxi-toggle" aria-label="Maximize image" title="Maximize image (F)" id="dMaxi"></button>
+      <button class="close" aria-label="Close" title="Close (Esc)" id="closeDetail"></button>
+      <div class="detail-media">
+        <!-- Filmstrip: the current result set, in the same order the arrows walk. It sits in the
+             MEDIA column rather than across the whole window so it lines up with the image and
+             leaves ✕ and the metadata panel alone. Its own size picker, separate from the grid's:
+             how big you want thumbnails while browsing and while navigating are different
+             questions, and the grid's XL (512px) would be absurd here. -->
+        <div class="filmstrip">
+          <!-- The scroller gets a wrapper of its own so the edge cues can be anchored to IT and not
+               to the row: the size picker sits at the row's right end, and an edge pinned to the
+               row would sit under it. -->
+          <div class="strip-viewport">
+            <div class="strip-scroll" id="stripScroll"></div>
+            <!-- The "there is more this way" cue. The author, 2026-09-09: "we have no cue for more
+                 thumbnails now." Drawn only on a side that can actually scroll, per the rail's rule
+                 that something which cannot apply is hidden rather than dimmed.
+                 DECORATION, NOT A CONTROL — a div and not a button, aria-hidden and transparent to
+                 the pointer. A chevron and a press target were built first and the author cut both: "I
+                 just want a visual cue when there are more. Could also achieve with a hard fade at
+                 the edge?" The fade alone says it, and the strip already scrolls by wheel, by the
+                 ← → keys and by following the selection, so a second way through was furniture on a
+                 bar he had just called busy. -->
+            <div class="strip-edge prev hidden" id="stripPrev" aria-hidden="true"></div>
+            <div class="strip-edge next hidden" id="stripNext" aria-hidden="true"></div>
+          </div>
+          <!-- The size picker and the position readout are ONE column at the row's right end, so
+               the strip has a single non-thumbnail block rather than two things competing for the
+               corner. -->
+          <div class="strip-aside">
+          <!-- A select, not the S/M/L/XL segmented bar the grid uses. Four segments cost ~176px of
+               a row whose whole job is to show thumbnails; closed, this is ~55px. The grid's bar
+               stays a bar because it sits in the rail with room to spare and is worth one click. -->
+          <select id="stripSize" title="Filmstrip size" aria-label="Filmstrip size">
+            <option value="112">S</option>
+            <option value="160">M</option>
+            <option value="224">L</option>
+            <option value="336">XL</option>
+          </select>
+          <!-- WHERE YOU ARE IN THE RESULT SET. The author's ask, 2026-09-09. The strip shows a window on
+               the set and the ← → keys walk the whole of it, so "17 of 2,043" is the only thing on
+               screen that says how far there is to go — the scroller cannot, since it holds one
+               page at a time and grows as you reach the end.
+               NOT a live region: it changes on every arrow press, and a screen reader announcing a
+               count each time you step would talk over the thing you moved to. -->
+          <span id="stripPos" class="strip-pos" title="Position in the current results"></span>
+          </div>
+        </div>
+        <!-- The arrows live INSIDE the image box, not on .detail, because that is what they
+             navigate. Anchored to .detail they needed an offset for the filmstrip above and a
+             clearance for the metadata panel beside — arithmetic that was only ever right in the
+             side-by-side layout, and put them across the middle of the page in a narrow window. -->
+        <div class="detail-img"><img id="dImg" alt="" onload="this.classList.add('in')" onerror="this.classList.add('in')"><video id="dVid" class="hidden" controls preload="metadata"></video><div id="dSong" class="song-detail hidden"></div><div id="dSetView" class="set-view hidden"></div><div id="dLoupe" class="loupe"></div><button class="nav prev" id="dPrev" title="Previous (←)">‹</button><button class="nav next" id="dNext" title="Next (→)">›</button><div id="dMaxiCap" class="maxi-cap hidden"></div></div>
+        <textarea id="dNote" class="detail-note" placeholder="Notes… (auto-saved)" rows="2"></textarea>
+      </div>
+      <div class="detail-meta">
+        <div class="detail-meta-scroll">
+        <!-- The favorite mark. It had a Hide twin beside it until 2026-09-08; .mark-toggle stays
+             a shared recipe because the labels' ::before still draws from a --ico the call site
+             supplies, and Quality/label marks use it too. -->
+        <!-- The star sits AFTER the name, at the row's right edge. The author, 2026-09-10: "makes it
+             easier to read the title, and is more similar to the location on single cards in the
+             grid" — a card's star is its top-RIGHT mark, so the detail view was the odd one out.
+             It also puts the heading before the control in reading order, which is the right way
+             round for anything reading the panel aloud. -->
+        <div class="detail-title">
+          <h3 id="dName"></h3>
+          <button id="dFav" class="mark-toggle" title="Toggle favorite" aria-label="Toggle favorite"></button>
+        </div>
+        <!-- shown when this image's library folder isn't reachable: says what still works -->
+        <div id="dOffline" class="offline-note hidden"></div>
+        <!-- The draggable picture beside a playing video, because a <video> cannot be dragged out as
+             a file. Two sources, one component (see setPairSource / setVideoSource): a merged pair
+             offers its real saved still, a lone video offers its own first frame. Both carry the
+             ComfyUI workflow; the label says which is which. -->
+        <div id="dPairSrc" class="pair-src hidden">
+          <img id="dPairThumb" draggable="true" alt="workflow source"
+               title="Drag into ComfyUI to load the workflow">
+          <!-- Filled by dragSourceLabel() from whichever set*Source() ran; empty here on purpose.
+               A static default would be a fourth copy of a sentence the other three already share,
+               and it is never seen -- the box is hidden until one of them has written it. -->
+          <div id="dPairSrcLabel" class="pair-src-label"></div>
+          <!-- Only when the run holds more than one still (see pair_stills). Wraps at both ends
+               rather than disabling: with the count sitting between them, two dead buttons explain
+               less than they cost. -->
+          <div id="dPairSrcNav" class="pair-src-nav hidden">
+            <button type="button" id="dPairPrev" class="tertiary btn-sm" title="Previous still" aria-label="Previous still">&lsaquo;</button>
+            <span id="dPairPos" aria-live="polite">1 / 1</span>
+            <button type="button" id="dPairNext" class="tertiary btn-sm" title="Next still" aria-label="Next still">&rsaquo;</button>
+          </div>
+        </div>
+        <div class="group-title">Details</div>
+        <div class="kv"><span>Model</span><div id="dModel" class="val"></div><button class="copy copy-ic" data-copy="model" title="Copy model name" aria-label="Copy model name"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg></button></div>
+        <!-- The FAMILY the checkpoint belongs to, derived at scan (index_db.recompute_model_types)
+             and the same value the rail's Model type filter groups by. Under Model, because it
+             answers a question about the line above it. Hidden when the file has no model, or has
+             one whose family could not be named — see hideEmptyDetailFields. -->
+        <div class="kv"><span>Model type</span><div id="dModelType" class="val"></div></div>
+        <div class="kv"><span>Folder</span><div id="dFolder" class="val"></div><button id="dFolderMore" class="copy-ic kv-more" title="Folder actions" aria-haspopup="true" aria-label="Folder actions"></button></div>
+        <div class="kv"><span>Library</span><div id="dRoot" class="val"></div></div>
+        <div class="kv" id="dSizeRow"><span>Dimensions</span><div id="dSize" class="val"></div></div>
+        <div class="kv"><span>File size</span><div id="dFilesize" class="val"></div></div>
+        <!-- Videos only in practice: hidden whenever the file has no length to report, so it costs
+             an image nothing. A song's length is already in its hero. -->
+        <div class="kv" id="dDurRow"><span>Duration</span><div id="dDuration" class="val"></div></div>
+        <div class="kv"><span>Date</span><div id="dDate" class="val"></div></div>
+        <div class="kv hidden" id="dQualRow"><span>Quality</span>
+          <div class="val"><b id="dReward" title="pyiqa quality score (1-10)"></b><span class="muted"> / 10</span></div></div>
+        <!-- Generation settings from the BASE sampler, plus the VAE (the author moved it here from the
+             Details block, 2026-08-23). Hidden wholesale when the file carries none, rather than
+             shown as a column of empty rows: a library predating either needs Rebuild metadata,
+             and until then an empty block would read as a fault. -->
+        <details id="dGenWrap" class="field prompt-field hidden">
+          <summary>Generation settings</summary>
+          <div class="kv"><span>Sampler</span><div id="dSampler" class="val"></div></div>
+          <div class="kv"><span>Scheduler</span><div id="dScheduler" class="val"></div></div>
+          <div class="kv"><span>CFG</span><div id="dCfg" class="val"></div></div>
+          <div class="kv"><span>Steps</span><div id="dSteps" class="val"></div></div>
+          <div class="kv"><span>Seed</span><div id="dSeed" class="val"></div></div>
+          <div class="kv"><span>VAE</span><div id="dVae" class="val"></div></div>
+        </details>
+        <details id="dLorasWrap" class="field prompt-field">
+          <summary><span id="dLorasLabel">LoRAs</span> <button class="copy copy-ic" data-copy="loras" title="Copy LoRAs" aria-label="Copy LoRAs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg></button></summary>
+          <div id="dLoras" class="loras-list"></div>
+        </details>
+        <details id="dPosWrap" class="field prompt-field">
+          <summary>Positive prompt <button class="copy copy-ic" data-copy="pos" title="Copy positive prompt" aria-label="Copy positive prompt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg></button></summary>
+          <textarea id="dPos" readonly></textarea>
+        </details>
+        <details id="dNegWrap" class="field prompt-field">
+          <summary>Negative prompt <button class="copy copy-ic" data-copy="neg" title="Copy negative prompt" aria-label="Copy negative prompt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg></button></summary>
+          <textarea id="dNeg" readonly></textarea>
+        </details>
+        <div class="group-title">Actions</div>
+        <div class="field">
+          <div class="field-head">Labels</div>
+          <div id="dLabels" class="label-btns"></div>
+        </div>
+        <div class="field">
+          <div class="field-head">Add tags</div>
+          <div class="searchbox">
+            <input id="dTagInput" list="tagoptions" placeholder="tag + Enter" autocomplete="off">
+          </div>
+          <div id="dTags" class="chips-row"></div>
+          <!-- Tags an extension found. Ordinary .chip, deliberately: what separates them from
+               the ones above is the LABELLED ROW, not a restyled chip. The first version made them
+               dashed and muted-on-accent, which read as broken rather than as different. -->
+          <div id="dExtTagsWrap" class="ext-tags hidden">
+            <div class="field-head">Found tags</div>
+            <div id="dExtTags" class="chips-row"></div>
+          </div>
+          <!-- An answer from a text extension. SHOWN AND NOT KEPT: it is cleared whenever the
+               panel changes file, and nothing writes it anywhere, which is why there is no way to
+               clear it and nothing to search. What marks it as machine-written is the labelled
+               row, the same rule as Found tags above — not a restyled body of text. -->
+          <div id="dAnswerWrap" class="ext-answer hidden">
+            <div class="field-head" id="dAnswerHead">Answer</div>
+            <p id="dAnswer" class="ext-answer-text"></p>
+          </div>
+          <datalist id="tagoptions"></datalist>
+        </div>
+        </div>
+        <div class="detail-actions">
+          <button id="dLoupeBtn" class="da-btn" title="Magnify (Z) — hold to peek · click to keep on · scroll to zoom" aria-label="Magnify"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8" /> <line x1="21" x2="16.65" y1="21" y2="16.65" /> <line x1="11" x2="11" y1="8" y2="14" /> <line x1="8" x2="14" y1="11" y2="11" /></svg></button>
+          <!-- The magnifier stands apart because it is the one control here that changes how you are
+               LOOKING at the file rather than where the file goes. The rule sits between it and the
+               four that leave the app; it deliberately does not sit deeper in that group, since
+               #dComfyOpen disappears for a file with no workflow and a rule beside a sometimes-absent
+               button sometimes separates nothing. -->
+          <div class="vsep"></div>
+          <button id="dCivitaiExport" class="da-btn" title="Export for Civitai — download a PNG copy Civitai can read" aria-label="Export for Civitai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3" /> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /> <path d="m7 10 5 5 5-5" /></svg></button>
+          <button id="dCopyAll" class="da-btn" title="Copy all metadata for Civitai (paste into a video post)" aria-label="Copy all metadata for Civitai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg></button>
+          <!-- Opens this file's workflow on ComfyUI's canvas — the one-click version of dragging it
+               there. Needs the bridge, which ships inside the VV nodes; hidden entirely for a
+               file that carries no workflow, dimmed when ComfyUI isn't answering. -->
+          <button id="dComfyOpen" class="da-btn" title="Open this workflow in ComfyUI" aria-label="Open in ComfyUI"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6" /> <path d="M10 14 21 3" /> <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg></button>
+          <button id="dReveal" class="da-btn" title="Show in Explorer" aria-label="Show in Explorer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" /></svg></button>
+          <!-- Extensions. Built by renderExtMenu() from whatever is switched on, and absent
+               entirely when that is nothing -- an icon opening an empty menu promises
+               something the app cannot do. -->
+          <button id="dExtBtn" class="da-btn hidden" title="Extensions" aria-label="Extensions"
+                  aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z" /></svg></button>
+          <button id="dDelete" class="da-btn da-danger" title="Recycle this image" aria-label="Recycle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 11v6" /> <path d="M14 11v6" /> <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /> <path d="M3 6h18" /> <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- library-wide duplicate report (read-only; the per-folder cull can only show duplicates you
+       are already standing in, which is no way to discover whether you have any) -->
+  <div id="dupesModal" class="overlay hidden">
+    <div class="overlay-bg"></div>
+    <div class="miner-box">
+      <div class="settings-head">
+        <h2>Duplicate files</h2>
+        <button class="close" aria-label="Close" title="Close (Esc)" id="dupesClose"></button>
+      </div>
+      <p class="set-help" id="dupesSummary">Scanning…</p>
+      <div id="dupesList" class="dupes-list"></div>
+      <div class="settings-foot">
+        <span id="dupesNote" class="set-status"></span>
+        <button id="dupesCull" class="danger hidden">Recycle</button>
+        <button id="dupesDone" class="primary">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- bulk tag (grid selection) — same autocomplete + chip UI as the detail view -->
+  <div id="tagModal" class="overlay hidden">
+    <div class="overlay-bg"></div>
+    <div class="tagmodal-box">
+      <div class="settings-head">
+        <h2 id="tagModalTitle">Add tags</h2>
+        <button class="close" aria-label="Close" title="Close (Esc)" id="tagModalClose"></button>
+      </div>
+      <p class="set-help">Type a tag and press Enter, or pick an existing one from the list. Each tag
+        applies to all selected images immediately; remove a chip to un-tag them.</p>
+      <div class="searchbox">
+        <input id="mTagInput" list="tagoptions" placeholder="tag + Enter" autocomplete="off">
+      </div>
+      <div id="mTags" class="chips-row"></div>
+      <div class="settings-foot">
+        <span id="mTagStatus" class="set-status"></span>
+        <button id="tagModalDone" class="primary">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- prompt miner: review + approve candidate tags mined from the whole root -->
+  <!-- debug trace (Settings → General → Record a debug trace). Reuses the miner modal's box so it
+       inherits the same size, scroll and head treatment rather than inventing a third dialog. -->
+  <div id="traceModal" class="overlay hidden">
+    <div class="overlay-bg"></div>
+    <div class="miner-box">
+      <div class="settings-head">
+        <h2 id="traceTitle">Debug trace</h2>
+        <button id="traceCopy" class="mini-btn" title="Copy the whole trace to the clipboard">Copy</button>
+        <button id="traceClear" class="mini-btn" title="Throw away what has been recorded so far">Clear</button>
+        <button class="close" aria-label="Close" title="Close (Esc)" id="traceClose"></button>
+      </div>
+      <p class="set-help">What the app did, newest last. Copy it into the chat and I can read the
+        sequence — which requests ran, how long each took, and what the view did in response.</p>
+      <pre id="traceOut" class="trace-out"></pre>
+    </div>
+  </div>
+
+  <!-- A text extension's answers over a selection. Shares .miner-box, the same way the debug trace
+       does — this is a list in a modal, which that shell already is, and only the list body is
+       peculiar to it.
+       NOT KEPT: closing this throws the answers away, which is why the footer says so and why
+       there is no Apply. The one button that matters while it runs is Cancel. -->
+  <div id="answersModal" class="overlay hidden">
+    <div class="overlay-bg"></div>
+    <div class="miner-box">
+      <div class="settings-head">
+        <h2 id="answersTitle">Answers</h2>
+        <button class="close" aria-label="Close" title="Close (Esc)" id="answersClose"></button>
+      </div>
+      <div id="answersList" class="answers-list"></div>
+      <div class="settings-foot">
+        <span id="answersStatus" class="set-status"></span>
+        <button id="answersCancel" class="secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+  <div id="minerModal" class="overlay hidden">
+    <div class="overlay-bg"></div>
+    <div class="miner-box">
+      <div class="settings-head">
+        <h2 id="minerTitle">Suggested tags</h2>
+        <button id="minerRemine" class="mini-btn has-ico" title="Scan this library again for candidate tags (discards the current list)">Scan again</button>
+        <button class="close" aria-label="Close" title="Close (Esc)" id="minerClose"></button>
+      </div>
+      <p class="set-help">Found in this library's positive prompts, folder names and file names,
+        ranked by how many images each appears in. Tick the ones worth keeping, then Apply —
+        they become normal tags on exactly those images.</p>
+      <div class="miner-controls">
+        <input id="minerFilter" type="text" placeholder="filter candidates…" autocomplete="off">
+        <label class="miner-thresh">min <input id="minerThresh" type="number" min="1" value="1"> imgs</label>
+        <span class="miner-srcs">
+          <label><input type="checkbox" class="minerSrc" value="prompt" checked> Prompt</label>
+          <label><input type="checkbox" class="minerSrc" value="folder" checked> Folder</label>
+          <label><input type="checkbox" class="minerSrc" value="filename" checked> Filename</label>
+        </span>
+        <span class="miner-bulk">
+          <button id="minerAll" class="mini-btn">Select shown</button>
+          <button id="minerNone" class="mini-btn">Clear</button>
+        </span>
+      </div>
+      <div id="minerList" class="miner-list"></div>
+      <div class="settings-foot">
+        <span id="minerStatus" class="set-status"></span>
+        <button id="minerApply" class="primary">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- reusable confirm / alert / prompt dialog -->
+  <div id="dialog" class="overlay hidden">
+    <div class="overlay-bg"></div>
+    <div class="dialog-box">
+      <!-- OPTIONAL, and absent unless a caller asks for one. Every other dialog in the app is a
+           question you answer in one breath and needs no heading; this exists for the few that
+           announce something before they ask — the after-an-update offer is the first. A heading on
+           an ordinary confirm would be a label reading "Confirm" above the thing it is confirming,
+           which is how a dialog gets taller without getting clearer. -->
+      <h2 id="dlgTitle" class="dialog-title hidden"></h2>
+      <div id="dlgMsg" class="dialog-msg"></div>
+      <input id="dlgInput" class="dialog-input hidden" type="text" autocomplete="off">
+      <!-- CHOICES MODE. Built by _dlgOpen, not written here: the options differ per caller, and one
+           of them (machine tags) only exists while a tagger extension is installed. Its own .hidden
+           rule lives in style.css — there is no global one. -->
+      <div id="dlgChoices" class="dialog-choices hidden"></div>
+      <div class="dialog-actions">
+        <button id="dlgCancel" class="ghost">Cancel</button>
+        <button id="dlgOk" class="primary">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- The window's bottom edge. Last in the body and purely decorative: it is chrome, not content,
+       and it must paint over everything including the detail overlay. -->
+  <div class="win-edge" aria-hidden="true"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
