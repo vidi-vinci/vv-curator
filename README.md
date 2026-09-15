@@ -61,6 +61,11 @@ If something specific stops you using it, please report it — a named problem i
 Needs **Windows**, **Python 3.8+** on your PATH, and a **Chromium-based browser** (Chrome, Edge,
 Brave…). Firefox works but opens a normal tab instead of the app window.
 
+**On macOS or Linux** it may well run — everything but the launcher is portable — with
+`pip install -r requirements.txt` then `python server.py`, opening the address it prints. You'd lose
+the app window and the *Show in Explorer* buttons. Completely untested, so treat it as an
+experiment; if you try it, [say how it went](https://github.com/vidi-vinci/vv-curator/issues).
+
 1. **Download it** from the [latest release](https://github.com/vidi-vinci/vv-curator/releases/latest)
    — the file called **`VV_Curator_<version>.zip`**. There is no separate build; that is the app.
 2. Unzip the folder anywhere — it runs from where you put it. There is no installer.
