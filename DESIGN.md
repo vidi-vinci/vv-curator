@@ -37,14 +37,16 @@ container outlines and the card's own frame keep `--border` and stay quiet.
 ### Accents & state
 | Token | Value | Use |
 |---|---|---|
-| `--accent` | `#4f8cff` | primary action, focus, selection |
+| `--accent` | `#4f8cff` | primary action, focus, selection — and **text**: links, the keep caption, `.ext-busy`. Never the ground under `--on-accent`; see the row below |
+| `--accent-fill` | *computed* — `color-mix(--accent, #000 20%)` | **the ground under `--on-accent`**, everywhere: `.chip`, `button.primary`, `.ftab-badge`, a selected card's check, every `.active` segment. White on `--accent` is 3.22:1, and no single blue can fix that — carrying white at 4.5 needs luminance ≤ 0.183, being readable as link text on `--bg` needs ≥ 0.211, and those do not overlap. Mixed rather than authored so a custom accent brings its own fill |
 | `--active` | `#3fb950` | active-filter highlight, and a FILL on the first-run Libraries nudge |
 | `--active-ink` | *computed* | text/glyph on an `--active` ground. Set by `applyTheme` (`inkOn`), same construction as the label inks. **Nothing uses it today** — the one caller took `--on-accent` instead (the author's call, 2026-09-07); kept because the next thing filled with `--active` will want it |
 | `--modified` | `#e0a23a` | drift marker — filters changed since a snapshot was restored |
 | `--danger` | `#ff6b6b` | destructive actions, errors |
 | `--success` | `#43d17a` | done / confirmed |
-| `--on-accent` | `#fff` | text and icons **on** `--accent` |
+| `--on-accent` | `#fff` | text and icons **on `--accent-fill`** — the name predates the split and stayed, because it is also the ink on `--active` fills and the 18% lightener every filled hover mixes in |
 | `--star` | `#ffca3a` | favourite star |
+| `--star-edge` | *computed* — `color-mix(--star, #000 35%)` | the star's rim. Gold on a light ground is 2.28:1 against the 3.0 a state mark needs; 1.4.11 asks that of a component's **boundary**, so the rim clears it and the gold stays gold. Applied as `drop-shadow(0 0 1px …)` on both stars — via `--star-rim` on the card (composed into the existing thumbnail shadow) and on `#dFav.on::before` (a mask, so there is no path to stroke) |
 
 ### Badges, tags, labels
 `--reward-bg #e0b23a` + `--reward-fg (=--bg)` (quality badge) · `--tag-fav #e0b83a` ·
@@ -192,7 +194,7 @@ Use these. Do not invent another for the same job.
 | `.inline-ico` | a control's own glyph quoted inside a sentence — "click the ⧉ icon" | the SVG is LIFTED from the live element at render time, never copied into the string; `vertical-align` keeps it out of the line box so the paragraph's leading doesn't jump |
 | `.lib-stat.nudge` | first-run state on the Libraries button: `--active` fill, `--on-accent` mark, fill-pulse | a filled state must override `button.lib-stat:hover`, which otherwise repaints it grey — this one rings, auto-refresh lightens |
 | `.popmenu` | menu surface; `.popmenu button` styles items | descendant selector — a non-item child inherits it |
-| `.icon-seg` / `.size-seg` | segmented control, exactly one `.active` | both derive from `--control-h` |
+| `.icon-seg` / `.size-seg` | segmented control, exactly one `.active` | both derive from `--control-h` — `#themeSeg` scopes its WIDTH only, never its height, because one instance quietly taller is how the 26px-vs-25px drift above began. **Reach for this whenever a row of buttons is really one question**: the Appearance tab had `Dark` / `Light` / `Reset to defaults`, where Reset and Dark were the same click (dark *is* the shipped default), nothing said which theme you were on, and a user pressed Reset on a default theme, saw nothing happen and reported it broken. Three actions were two, and the state they were all describing had no name until `Custom` got one. The lit segment is derived from the colours themselves, not from the last button pressed, so a theme restored from `config.json` lights the right one with nothing having had to remember |
 | `.quiet-field` | a control drawn only while doing something | see the rule above |
 | `.vsep` / `.rail-sep` / `.pane-sep` | vertical / full-bleed horizontal / inset horizontal rule | `.rail-sep` cancels `--rail-pad` with a negative margin — they must agree. `.pane-sep` does not: full bleed means “section of the rail”, inset means “group within one pane” |
 | `.rail-cluster` | two or more controls pinned to the far edge of a row that wraps | The `margin-left:auto` goes on the WRAPPER, never on one of the children — a bare child's auto-margin holds only until the row is narrow enough to wrap, and then strands its neighbour on another line. Currently the Libraries strip's timer + check |

@@ -4951,8 +4951,18 @@ const THEME_TOKENS = THEME_GROUPS.flatMap(([, toks]) => toks);   // flat list fo
 const THEME_LIGHT = {
   '--bg': '#f6f7f9', '--bg2': '#ffffff', '--bg3': '#eceef2', '--sidebar-bg': '#e6e9ee',
   '--fg': '#1b1e24', '--muted': '#5b6470', '--border': '#d6dae1',
-  '--accent': '#2f6fe0', '--active': '#2e9e4d', '--danger': '#d64545',
-  '--success': '#2e9e4d', '--star': '#d99a1a', '--modified': '#8f5d0c',   // 4.6:1 on the light rail
+  // FOUR OF THESE WERE RAISED TO CLEAR WCAG on 2026-09-15, the first time the contrast audit was
+  // acted on rather than just run. Each keeps its hue and loses a little lightness -- the same
+  // colour a step deeper, not a new one -- and each is the value that clears its bar against EVERY
+  // light surface (--bg, --bg2, --bg3, --sidebar-bg), not only the pairs the audit happens to
+  // check, so a new pairing later cannot quietly reopen this.
+  //   --accent  4.38 -> 4.65   --danger  4.08 -> 4.63
+  //   --success 3.20 -> 4.63   --active  2.82 -> 3.10 (a state mark, so its bar is 3.0)
+  // --star is deliberately UNCHANGED. Darkening gold far enough to clear 3.0 lands on #b78216,
+  // which is not gold any more; it gets --star-edge instead, a rim, which is what WCAG's 3.0 asks
+  // for on a component to begin with. The author's call after seeing both.
+  '--accent': '#2061d3', '--active': '#2c9649', '--danger': '#c42b2b',
+  '--success': '#23763a', '--star': '#d99a1a', '--modified': '#8f5d0c',   // 4.6:1 on the light rail
 };
 let _themeEdit = {};   // working overrides while the Appearance tab is open
 // Apply overrides live; a token absent from `obj` reverts to its CSS default.
@@ -5021,7 +5031,36 @@ function renderThemeRows() {
   ).join('');
 }
 // Load a preset/override set into the working copy, apply it, and refresh the pickers.
-function setThemeEdit(obj) { _themeEdit = { ...obj }; applyTheme(_themeEdit); renderThemeRows(); }
+function setThemeEdit(obj) { _themeEdit = { ...obj }; applyTheme(_themeEdit); renderThemeRows(); syncThemeSeg(); }
+
+/* ---- which theme segment is TRUE ------------------------------------------------------------
+   The bar reports a state, it does not remember a click. Asking the colours themselves means a
+   theme restored from config.json lights the right segment without anything having to have stored
+   which button was last pressed -- and editing one swatch moves you to Custom on its own, which is
+   the thing the old row could not say. */
+function sameTheme(a, b) {
+  const ka = Object.keys(a || {}), kb = Object.keys(b || {});
+  return ka.length === kb.length &&
+         ka.every(k => String(a[k] || '').toLowerCase() === String(b[k] || '').toLowerCase());
+}
+function themeMode(obj) {
+  if (!obj || !Object.keys(obj).length) return 'dark';   // no overrides at all IS the dark default
+  return sameTheme(obj, THEME_LIGHT) ? 'light' : 'custom';
+}
+// Your own colours, held aside while you look at a preset, so previewing Light and coming back
+// does not cost you the set you were building. Null until there is one to keep.
+let _themeCustom = null;
+function syncThemeSeg() {
+  const mode = themeMode(_themeEdit);
+  if (mode === 'custom') _themeCustom = { ..._themeEdit };   // keep the latest as you edit
+  document.querySelectorAll('#themeSeg button').forEach(b => {
+    b.classList.toggle('active', b.dataset.theme === mode);
+    // Custom is a real segment only once there is something to go back TO. Disabled rather than
+    // hidden: a bar that changes width when you touch a swatch is a bar that moves under the
+    // pointer, and the segment has to be visible for its absence to mean anything.
+    if (b.dataset.theme === 'custom') b.disabled = !_themeCustom;
+  });
+}
 
 async function openSettings(section) {
   const cfg = await getJSON('/api/config');
@@ -5041,6 +5080,10 @@ async function openSettings(section) {
   if (applyExtensions()) search(true);
   state.theme = cfg.theme || {};
   _themeEdit = { ...state.theme }; renderThemeRows();   // start editing from the saved theme
+  // A saved theme that matches neither preset IS your custom one, so Custom is reachable the moment
+  // the dialog opens rather than only after you touch a swatch in this sitting.
+  _themeCustom = themeMode(state.theme) === 'custom' ? { ...state.theme } : null;
+  syncThemeSeg();
   // Same working-copy contract. Deep-copied, or Cancel would leave the edits behind in state.cards.
   state.cards = cfg.cards || state.cards;
   _cardsEdit = (state.cards || []).map(r => ({ ...r }));
@@ -8367,10 +8410,19 @@ $('#themeRows').addEventListener('input', e => {
   _themeEdit[inp.dataset.token] = inp.value;
   document.documentElement.style.setProperty(inp.dataset.token, inp.value);
   const hex = inp.parentElement.querySelector('.tr-hex'); if (hex) hex.textContent = inp.value;
+  // Touching a swatch is what MAKES it custom, so the bar has to follow the edit rather than the
+  // last button pressed. Not setThemeEdit: that re-renders every row, which would tear the open
+  // colour picker out from under the pointer mid-drag. syncThemeSeg only repaints the segments.
+  syncThemeSeg();
 });
-$('#themeDark').addEventListener('click', () => setThemeEdit({}));         // dark = the CSS defaults
-$('#themeLight').addEventListener('click', () => setThemeEdit(THEME_LIGHT));
-$('#themeReset').addEventListener('click', () => setThemeEdit({}));
+document.querySelectorAll('#themeSeg button').forEach(b => b.addEventListener('click', () => {
+  const want = b.dataset.theme;
+  if (want === themeMode(_themeEdit)) return;    // already true; a segment is not a re-apply button
+  // Bank what you built BEFORE leaving it, or previewing a preset would throw it away. syncThemeSeg
+  // keeps _themeCustom current while you are in Custom, so by here it is already the right set.
+  if (want === 'custom') { if (_themeCustom) setThemeEdit(_themeCustom); return; }
+  setThemeEdit(want === 'light' ? THEME_LIGHT : {});   // dark = no overrides = the CSS defaults
+}));
 // BOTH TAKE THE LIBRARY AS AN ARGUMENT, and that is the whole fix. They used to be Settings buttons
 // with no library to name, so the server fell back to its invisible "management target" -- a pointer
 // set by adding a library or opening its menu, which nothing on screen shows and nobody chooses.
@@ -8613,7 +8665,23 @@ async function boot() {
     // no element and no style.
     if (cfg.build) {
       _build = cfg.build;
-      const label = `${_appName || 'VV Curator'} — build ${cfg.build}`;
+      // TWO QUESTIONS, AND THEY ARE NOT THE SAME ONE. The build stamp answers "did update.bat pick
+      // that up?"; the VERSION answers "which release am I on?", which is the one a bug report and
+      // the GitHub releases page both need, and it was answerable nowhere at all until now -- it
+      // appeared only in the first-run greeting and the update pop-up, neither of which can be
+      // summoned. The author, 2026-09-15, on the tooltip: "it may not match the new versioning for
+      // github." It could not: one is a file timestamp, the other is APP_VERSION.
+      // ONE STRING, BUILT ONCE, so the brand and the Settings header cannot drift about what you
+      // are running.
+      const verText = (_appVersion ? `${_appVersion} — ` : '') + `build ${cfg.build}`;
+      const label = `${_appName || 'VV Curator'} ${verText}`;
+      // AND A PLACE TO GO AND LOOK. The line in the RAIL was removed for being permanent space
+      // given to something read once and then ignored for days, and that still holds -- but
+      // Settings is a dialog you open on purpose, so the same fact costs nothing until it is
+      // wanted. The tooltip stays; what it could not do is be read out when someone asks you for
+      // your version, because you cannot hover on request.
+      const verEl = document.getElementById('setVersion');
+      if (verEl) verEl.textContent = _appVersion ? `Version ${verText}` : verText;
       // Both the row and the name: the row so the LOGO is a hover target too, the name because an
       // inner title wins over its parent's and the span already had one. Same text, so which one
       // the pointer lands on makes no difference. The gear and power buttons keep their own.

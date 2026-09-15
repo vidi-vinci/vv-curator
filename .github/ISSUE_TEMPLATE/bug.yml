@@ -1,0 +1,42 @@
+name: Something else is broken
+description: Anything that is not about a file's prompt, model or settings.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Which version
+      description: >
+        Open Settings and it is beside the heading, or hover the app name in the top left
+        corner. The build stamp beside it is useful too if you have it.
+      placeholder: "1.0 - build 2026-09-15 11:39"
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Which browser it opened in
+      description: >
+        VV Curator opens in whichever browser Windows treats as your default. Firefox
+        is genuinely untested and gets a plain tab rather than the app window, so it
+        is worth saying if that is the one you are on.
+      options:
+        - Chrome
+        - Edge
+        - Brave
+        - Firefox
+        - Another one
+        - Not sure

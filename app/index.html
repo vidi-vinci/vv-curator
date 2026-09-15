@@ -674,6 +674,9 @@
     <div class="settings-box">
       <div class="settings-head">
         <h2>Settings</h2>
+        <!-- Which release you are on, somewhere you can go and LOOK. The brand's tooltip carries
+             the same string, but a tooltip cannot be summoned when someone asks you for it. -->
+        <span class="hint" id="setVersion"></span>
         <div class="settings-head-actions">
           <button id="settingsHelp" class="icon-btn" type="button" title="Help for these settings" aria-label="Help for these settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /></svg></button>
           <button class="close" aria-label="Close" title="Close (Esc)" id="settingsClose"></button>
@@ -858,11 +861,17 @@
           </section>
           <section class="settings-panel hidden" data-sec="appearance">
             <div class="set-row">
-              <label>Theme presets</label>
+              <label>Theme</label>
               <div class="set-inline">
-                <button id="themeDark" class="secondary">Dark</button>
-                <button id="themeLight" class="secondary">Light</button>
-                <button id="themeReset" class="ghost">Reset to defaults</button>
+                <!-- STATES, not three actions. "Dark" and "Reset to defaults" used to be the same
+                     click -- both cleared every override, and since dark IS the shipped default the
+                     two were one button wearing two labels. Exactly one segment is true of your
+                     colours at any moment, and Custom is the one the old row could not say. -->
+                <div id="themeSeg" class="size-seg" role="group" aria-label="Theme">
+                  <button type="button" data-theme="dark">Dark</button>
+                  <button type="button" data-theme="light">Light</button>
+                  <button type="button" data-theme="custom" title="Colors you set yourself">Custom</button>
+                </div>
               </div>
             </div>
             <div class="set-row">

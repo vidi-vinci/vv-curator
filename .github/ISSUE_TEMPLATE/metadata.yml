@@ -1,0 +1,82 @@
+name: A file's details are wrong or missing
+description: A picture or video shows no prompt, no model, or the wrong ones.
+title: "Details wrong or missing: "
+labels: ["metadata"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most useful thing you can report. VV Curator has only ever been
+        tested against one person's files, so a file it reads badly is exactly what
+        needs finding.
+
+  - type: dropdown
+    id: what
+    attributes:
+      label: What is wrong
+      options:
+        - No prompt
+        - No model
+        - The wrong model
+        - No generation settings
+        - Nothing at all is read from the file
+        - Something else
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provenance
+    attributes:
+      label: Is this the original file, or a copy?
+      description: >
+        The first thing worth knowing. A copy that has been exported, uploaded or
+        re-saved often carries less than the file that came out of the generator,
+        and that is usually the whole answer.
+      options:
+        - Straight out of ComfyUI, A1111 or similar
+        - Exported from VV Curator (Export for Civitai)
+        - Downloaded from Civitai
+        - Edited or re-saved by something else
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: maker
+    attributes:
+      label: What made the file
+      placeholder: ComfyUI, A1111, Forge, SwarmUI, InvokeAI...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What the app shows, and what you expected
+      placeholder: |
+        Shows: no prompt, model reads "unknown"
+        Expected: the prompt and checkpoint I can see in ComfyUI when I load it
+    validations:
+      required: true
+
+  - type: textarea
+    id: file
+    attributes:
+      label: The file itself, if you can share it
+      description: >
+        Drag it into this box to attach it. A PNG carries its workflow inside it, so
+        the original file usually answers all of the above on its own.
+
+
+        No NSFW images please. This tracker is public. If the picture is not one you
+        would post anywhere, a different file that fails the same way works just as
+        well, and so does a description of the workflow.
+
+  - type: input
+    id: version
+    attributes:
+      label: Which version
+      description: >
+        Open Settings and it is beside the heading, or hover the app name in the top left
+        corner. The build stamp beside it is useful too if you have it.
+      placeholder: "1.0 - build 2026-09-15 11:39"

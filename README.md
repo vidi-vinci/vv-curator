@@ -50,7 +50,8 @@ One place, so nothing gets lost in a comment thread. No template to fill in — 
 
 ## Accessibility
 
-Not tuned for accessibility yet, and most of it has never been checked. The one thing worth knowing:
+Not tuned for accessibility yet, though text contrast is now measured in both themes and meets
+WCAG AA; keyboard reach and focus visibility are still unchecked. The one thing worth knowing:
 **curation labels carry their name as well as their colour**, so the core workflow doesn't depend on
 telling green from amber.
 

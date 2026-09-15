@@ -168,8 +168,9 @@ never downloads or installs anything — updating is still you replacing the fol
 stops the request itself, not just the icon.
 
 **Cards** sets which details appear on a card and in what order — Dimensions · Duration · Age · File
-size · Model · Folder, each Always / On hover / Off. **Appearance** is live colour pickers, saved
-per install. **Miner** tunes what **Scan for tags** counts as a candidate — it is in a
+size · Model · Folder, each Always / On hover / Off. **Appearance** is Dark, Light or Custom plus
+live colour pickers, saved per install; touching any picker moves you to Custom, and the preset you
+were on is one click away again. **Miner** tunes what **Scan for tags** counts as a candidate — it is in a
 library's `⋯` menu, and reads your positive prompts, folder names and file names to suggest
 tags from what it finds.
 
