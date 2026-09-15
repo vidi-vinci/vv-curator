@@ -62,8 +62,7 @@ Needs **Windows**, **Python 3.8+** on your PATH, and a **Chromium-based browser*
 Brave…). Firefox works but opens a normal tab instead of the app window.
 
 1. **Download it** from the [latest release](https://github.com/vidi-vinci/vv-curator/releases/latest)
-   — the file called **Source code (zip)**. Despite the name, that is the whole app, ready to
-   run; there is no separate build.
+   — the file called **`VV_Curator_<version>.zip`**. There is no separate build; that is the app.
 2. Unzip the folder anywhere — it runs from where you put it. There is no installer.
    **Right-click the zip → Properties → tick Unblock → Apply, before extracting.** Windows marks
    downloaded files and may refuse to run `start.bat`; unblocking the zip clears every file inside

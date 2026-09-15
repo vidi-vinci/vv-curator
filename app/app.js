@@ -2082,8 +2082,23 @@ async function prependNewImages() {
   // it, and on newest-first the new cards land at the front, which is the worst case for both. The author
   // settled it 2026-08-18: **lock the detail view, let the library keep up.** So the strip and the
   // arrows stay exactly as they were, and closing folds the new cards in.
-  if (!$('#overlay').classList.contains('hidden')) { _deferredNew = true; return; }
-  if (state.sort !== 'date' || state.order !== 'desc' || window.scrollY > 4) { _deferredNew = true; return; }
+  // THE THREE DEFERRALS ARE TRACED INDIVIDUALLY, because this is the end of the road where "it
+  // didn't update" is most often true and correct: the files ARE indexed, the scan DID run, and the
+  // cards are deliberately not being shown yet. From the grid that is indistinguishable from a
+  // refresh that never happened, and the fix for each is different — close the image, scroll up, or
+  // change the sort.
+  if (!$('#overlay').classList.contains('hidden')) {
+    _deferredNew = true;
+    Trace.add('refresh', `${fresh.length} new card(s) held back — an image is open`);
+    return;
+  }
+  if (state.sort !== 'date' || state.order !== 'desc' || window.scrollY > 4) {
+    _deferredNew = true;
+    Trace.add('refresh', `${fresh.length} new card(s) held back — `
+      + (window.scrollY > 4 ? `scrolled ${Math.round(window.scrollY)}px down`
+                            : `sort is ${state.sort} ${state.order}, not newest-first`));
+    return;
+  }
   // BELOW the three deferral returns above, deliberately: a deferred prepend leaves the grid as it
   // found it, so a panel standing over an empty result set must still be standing. Only the branch
   // that actually inserts gets to contradict it.
@@ -2092,6 +2107,7 @@ async function prependNewImages() {
   syncThumbsToCardWidth();      // cards are drawn stretched; match the thumbnails to that width
   state.items = fresh.concat(state.items);
   state.offset += fresh.length;                             // keep the pagination window consistent
+  Trace.add('refresh', `${fresh.length} new card(s) added to the top of the grid`);
   _deferredNew = false;
 }
 // ---- Busy: ONE owner for every "the app is working" indicator ---------------------------------
@@ -6389,11 +6405,22 @@ async function refreshChanged() {
 // post-run check and repaint the list under a spinning row.
 const CHANGE_PROBE_MS = 20000;
 let _lastChangeProbe = 0;
+// The OTHER half of "it didn't update": this is what turns the strip's ↻ amber, and it runs whether
+// or not the auto-refresh clock is on. A mark that never appears and a grid that never fills are
+// the same complaint from the outside and different bugs underneath, so the trace has to tell them
+// apart. Not summarised like the tick's gates — probeChanges has only two exits and its callers are
+// user actions (a search, coming back to the window), so it cannot run away with the buffer.
 function probeChanges() {
-  if (Job.busy || _refreshBusy || _autoScanning) return;
+  if (Job.busy || _refreshBusy || _autoScanning) {
+    return Trace.add('probe', 'skipped — something is already running');
+  }
   const now = Date.now();
-  if (now - _lastChangeProbe < CHANGE_PROBE_MS) return;
+  if (now - _lastChangeProbe < CHANGE_PROBE_MS) {
+    return Trace.add('probe', `skipped — asked ${Math.round((now - _lastChangeProbe) / 1000)}s ago `
+                            + `(one per ${CHANGE_PROBE_MS / 1000}s)`);
+  }
   _lastChangeProbe = now;
+  Trace.add('probe', 'asking whether anything landed on disk');
   checkChanges();          // deliberately NOT awaited
 }
 // ---- auto-refresh (idle-driven) --------------------------------------------------------------
@@ -6411,6 +6438,47 @@ let _lastActivity = Date.now();
 let _lastAutoRefresh = 0;
 let _autoScanning = false;
 let _deferredNew = false;     // new files indexed while scrolled down — fold in once back at the top
+
+// ---- what the trace sees of all this ----------------------------------------------------------
+// "It didn't update" was undiagnosable, because the tick below has NINE ways to decide against
+// doing anything and every one of them was a bare `return`. Two such gates were fixed on
+// 2026-08-23 by reading the code and guessing; this is how the next one gets caught instead.
+//
+// A ROW PER TICK WOULD DROWN THE TRACE. The timer runs every 5s, so an idle app would file twelve
+// rows a minute and push everything else off the front of a 600-row buffer in under an hour — the
+// trace would record only its own heartbeat. So a gated tick is logged when the REASON CHANGES,
+// and the run of identical ones is summarised by count when it ends. A tick that actually RUNS is
+// always logged, because at most one fires per idle stretch and it is the interesting case.
+// Where the refresh story stands RIGHT NOW, written at the top of a fresh recording. Everything
+// else here is an event; this is the state those events happen against.
+function traceRefreshState() {
+  // Forget any run of skips in progress. Switching the trace on CLEARS the rows but not this
+  // module's memory, so without it a fresh recording can open with "…and 10 more stopped the same
+  // way" and never say which way that was — a summary of rows the reader cannot see.
+  _gateWas = null; _gateRun = 0;
+  Trace.add('refresh', `clock is ${_autoOn ? 'ON' : 'OFF'}`
+    + (_autoOn ? ` — checks every ${AUTO_CHECK_MS / 1000}s, acts after ${IDLE_MS / 1000}s of quiet` : '')
+    + ` · ${(state.roots || []).length} librar${(state.roots || []).length === 1 ? 'y' : 'ies'}`
+    + ` · sort=${state.sort} ${state.order}`
+    + (_deferredNew ? ' · new files are being held back' : ''));
+}
+// THE RUN IS KEYED ON WHICH GATE, NOT ON ITS WORDING. The wording carries live numbers ("active 5s
+// ago", then 6s, then 11s), so comparing sentences makes every tick look like a new reason and the
+// flood this exists to prevent comes back — which is exactly what the first version did, at one row
+// per 5s tick. The key is the gate's identity; the sentence is written once, for the row that opens
+// the run, where the numbers are still worth having.
+let _gateWas = null, _gateRun = 0;
+function traceGate(key, detail) {
+  if (!Trace.on) return;
+  if (key === _gateWas) { _gateRun++; return; }
+  if (_gateWas && _gateRun) Trace.add('refresh', `…and ${_gateRun} more stopped the same way`);
+  _gateWas = key; _gateRun = 0;
+  // A null key means the tick got through, and it writes NO row of its own: the line immediately
+  // below it already says "checking for new files", so announcing the same event twice would just
+  // push the rest of the trace off the front of the buffer. Its whole job here is to close any run
+  // of skips above.
+  if (key) Trace.add('refresh', `tick stopped — ${detail}`);
+}
 // "Am I mid-task in a modal?" — renaming, changing a setting, tagging a selection. Refreshing the
 // library under one of those is obviously wrong, so background work stands down for them.
 //
@@ -6440,6 +6508,12 @@ function anyModalOpen() {
 // workflow: generate in ComfyUI, switch back, change nothing. Same throttle, so flicking between
 // tabs costs one round trip rather than one per flick.
 document.addEventListener('visibilitychange', () => {
+  // BOTH DIRECTIONS are traced, and the hidden one matters most: browsers throttle a background
+  // tab's timers to roughly once a minute, so the 5s cadence quietly becomes 60s and a gap in the
+  // trace that looks like a bug is the browser doing its job. Nothing else records that boundary.
+  Trace.add('refresh', document.hidden
+    ? 'tab hidden — timers now throttled by the browser (~1/min)'
+    : 'tab visible again — checking straight away');
   if (document.hidden) return;
   probeChanges();
   autoRefreshTick('return');
@@ -6481,18 +6555,34 @@ async function autoRefreshTick(mode) {
   // interacting with the viewer" and it's the core use case (generating in ComfyUI while this tab
   // sits in the background), so refreshing then is the whole point. Browsers throttle timers in
   // background tabs to ~1/min, so the effective cadence there is slower than AUTO_CHECK_MS.
-  if (!_autoOn || anyModalOpen()) return;
+  if (!_autoOn) return traceGate('off', 'the auto-refresh clock is switched off');
+  if (anyModalOpen()) return traceGate('modal', 'a modal is open (Settings, Rename, Setup or Tags)');
   // Nothing to refresh before a library exists -- and the switch can arrive ON without one, since
   // it is restored from localStorage during script evaluation, before boot() has loaded anything.
   // Guarded HERE rather than by forcing the switch off: the saved preference is the user's, and a
   // first run must not silently spend it.
-  if (!(state.roots || []).length) return;
-  if (Job.busy || _refreshBusy || _autoScanning) return;   // a scan / manual R is already in flight
+  if (!(state.roots || []).length) return traceGate('noroots', 'no library yet');
+  if (Job.busy || _refreshBusy || _autoScanning) {         // a scan / manual R is already in flight
+    return Job.busy      ? traceGate('job',     'a job is already running')
+         : _refreshBusy  ? traceGate('manual',  'a manual refresh is already running')
+                         : traceGate('overlap', 'the previous auto-refresh has not finished');
+  }
   if (!forced) {
     // Skipped on return: see above — the act of coming back is what stamps this.
-    if (!returning && Date.now() - _lastActivity < IDLE_MS) return;   // engaged → stay paused
-    if (Date.now() - _lastAutoRefresh < IDLE_MS) return;   // at most one fire per idle stretch
+    if (!returning && Date.now() - _lastActivity < IDLE_MS) {          // engaged → stay paused
+      return traceGate('active',
+        `you were active ${Math.round((Date.now() - _lastActivity) / 1000)}s ago `
+        + `(needs ${IDLE_MS / 1000}s of quiet)`);
+    }
+    if (Date.now() - _lastAutoRefresh < IDLE_MS) {         // at most one fire per idle stretch
+      return traceGate('throttled',
+        `already refreshed ${Math.round((Date.now() - _lastAutoRefresh) / 1000)}s ago `
+        + `(one per ${IDLE_MS / 1000}s)`);
+    }
   }
+  traceGate(null);   // closes any run of skips above, and says this one is going ahead
+  const done = Trace.start('refresh',
+    `checking for new files (${forced ? 'switched on' : returning ? 'came back to the window' : 'idle timer'})`);
   _lastAutoRefresh = Date.now();
   _lastChangeProbe = Date.now();   // shares the probe's clock so the two paths can't double up
   _autoScanning = true;
@@ -6511,11 +6601,25 @@ async function autoRefreshTick(mode) {
     if (!keys.length) {
       // No new disk changes — but if we deferred some while scrolled down and we're back at the top,
       // fold them in now (no scan needed; they're already indexed).
-      if (_deferredNew && window.scrollY <= 4 && state.sort === 'date' && state.order === 'desc') await prependNewImages();
+      const canFold = _deferredNew && window.scrollY <= 4 && state.sort === 'date' && state.order === 'desc';
+      if (canFold) await prependNewImages();
+      // Says WHICH of the three "nothing happened" endings this was. They look identical from the
+      // grid and mean completely different things: nothing on disk, versus files waiting that the
+      // view cannot accept yet.
+      done(!_deferredNew ? 'nothing new on disk'
+         : canFold ? 'nothing new on disk · folded in the files held from earlier'
+         : `nothing new on disk · ${window.scrollY > 4 ? 'holding new files until you scroll back to the top'
+                                                       : 'holding new files until the sort is newest-first'}`);
       return;
     }
+    done(`${keys.length} librar${keys.length === 1 ? 'y has' : 'ies have'} new files — rescanning`);
     for (const k of keys) { if (!(await rescanLib(k, true))) break; }   // one at a time, quietly
-  } catch (e) { /* silent in auto mode */ }
+  } catch (e) {
+    // NOT silent any more, to the trace. Still silent on screen — an auto-refresh nobody asked for
+    // must not raise an error — but a failing refresh and a quiet one looked identical from here,
+    // which is the single worst case for "it didn't update".
+    Trace.add('refresh', `FAILED — ${e && e.message ? e.message : e}`);
+  }
   finally {
     _autoScanning = false;
     if (clock) clock.classList.remove('busy');
@@ -6525,6 +6629,10 @@ async function autoRefreshTick(mode) {
 // kick=true means "and act on it now". Turning the timer on — or launching with it on — IS the
 // instruction to keep the library current, so it should not sit on a flagged change for 30 seconds.
 function setAutoRefresh(on, kick) {
+  // The first thing anyone needs to know when reading a trace about auto-refresh: was it even on?
+  // It is restored from localStorage before boot, so a trace can otherwise open mid-story.
+  Trace.add('refresh', `clock switched ${on ? 'ON' : 'OFF'}`
+    + (on ? ` — checks every ${AUTO_CHECK_MS / 1000}s, acts after ${IDLE_MS / 1000}s of quiet` : ''));
   _autoOn = on;
   const b = $('#autoRefresh');
   if (b) {
@@ -7595,6 +7703,11 @@ function openTraceModal() {
 function closeTraceModal() { $('#traceModal').classList.add('hidden'); }
 $('#setTrace').addEventListener('change', e => {
   Trace.set(e.target.checked);
+  // Switching the trace on CLEARS it, so anything the app decided before this moment is gone —
+  // including whether the auto-refresh clock is running, which is restored from localStorage before
+  // boot and never mentioned again. Without this line a trace of "it didn't update" can open with
+  // the clock switched off and no way to tell.
+  if (e.target.checked) traceRefreshState();
   toast(e.target.checked ? 'Recording a trace — use the app, then Show trace' : 'Trace off');
 });
 $('#showTrace').addEventListener('click', () => { closeSettings(); openTraceModal(); });
@@ -7999,8 +8112,18 @@ document.addEventListener('keydown', e => {
   // disagreed: the grid-view guard did not know about the three panels, so with only the duplicates
   // window up it concluded nothing was open, treated Escape as clear-selection and returned before
   // the ladder ever ran — the Escape support looked wired and did nothing.
+  // THE TWO SMALL POP-UPS COUNT TOO, and leaving them out is the same bug the paragraph above
+  // describes, recurred on the two newest overlays. The ladder below already had a branch for each
+  // of them; neither could ever run, because Escape was treated as grid-view clear-selection and
+  // returned first. Found 2026-09-15 while testing the version notice end to end.
+  //
+  // THE RULE THIS KEEPS BREAKING: a new overlay has to be added HERE as well as to the ladder.
+  // One list decides whether Escape is even about layers; the other decides which layer it takes.
+  // An overlay in only the second is wired to nothing, and looks wired to anyone reading it.
   const layerOpen = settingsOpen || renameOpen || setupOpen || tagModalOpen || helpOpen
-                 || detailOpen || !!panelClose;
+                 || detailOpen || !!panelClose
+                 || !$('#updateBox').classList.contains('hidden')
+                 || !$('#helpHint').classList.contains('hidden');
   // Ctrl+Z, ABOVE the layer split on purpose: a recycle from the detail view leaves the detail
   // open (it advances to the next image), so a grid-only binding would be dead in the one place
   // you most often delete from. Guarded on the offer actually standing, so it never means anything
