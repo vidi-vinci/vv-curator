@@ -45,11 +45,102 @@ container outlines and the card's own frame keep `--border` and stay quiet.
 | `--danger` | `#ff6b6b` | destructive actions, errors |
 | `--success` | `#43d17a` | done / confirmed |
 | `--on-accent` | `#fff` | text and icons **on `--accent-fill`** — the name predates the split and stayed, because it is also the ink on `--active` fills and the 18% lightener every filled hover mixes in |
-| `--star` | `#ffca3a` | favourite star |
-| `--star-edge` | *computed* — `color-mix(--star, #000 35%)` | the star's rim. Gold on a light ground is 2.28:1 against the 3.0 a state mark needs; 1.4.11 asks that of a component's **boundary**, so the rim clears it and the gold stays gold. Applied as `drop-shadow(0 0 1px …)` on both stars — via `--star-rim` on the card (composed into the existing thumbnail shadow) and on `#dFav.on::before` (a mask, so there is no path to stroke) |
+| `--star` | `#ffca3a` | favourite star — **absolute, in both themes.** It lives in the corner of a picture, so the light preset must not darken it; `--star-edge` is what carries it on a themed surface. See *Marks on a picture* below |
+| `--reward-fg` | *computed* — `inkOn(--reward-bg)` | ink on the Quality badge. Was `var(--bg)`, which put a themed ink on a gold that is the same in both themes: 9.14:1 in dark, **1.85:1** in light. Computed for the same reason the label inks are — `--reward-bg` is user-editable |
+| `--star-edge` | *computed* — `color-mix(--star, #000 40%)` | the star's rim. Gold on a light ground is 2.28:1 against the 3.0 a state mark needs; 1.4.11 asks that of a component's **boundary**, so the rim clears it and the gold stays gold. Applied as `drop-shadow(0 0 1px …)` on both stars — via `--star-rim` on the card (composed into the existing thumbnail shadow) and on `#dFav.on::before` (a mask, so there is no path to stroke) |
+
+### Marks on a picture
+
+**A mark laid over a picture must carry its own ground — and once it does, that ground may follow
+the theme.** It cannot rely on what is behind it: a photograph follows nobody, and the letterbox
+beside it follows the preset. So legibility comes from a scrim, never a hairline. What stays
+absolute is anything with no ground of its own — the star, which has only a rim, and the Quality
+badge's gold, whose ink is computed from itself rather than from the page. Pinned by
+`tests/test_media_marks.py`.
+
+| Token | Use |
+|---|---|
+| `--card-scrim` / `--card-scrim-soft` / `--card-scrim-strong` | the ground under the card's own furniture: badges, facts bar, caption, zoom, selection check |
+| `--card-ink` | what sits on those grounds |
+| `--card-edge` / `--card-edge-soft` | the selection check's outline, the idle star |
+
+All six are `light-dark()` pairs whose **dark halves are exactly what shipped**, so the dark theme
+does not move. They resolve against `color-scheme`, which `applyTheme` already sets from the
+effective `--bg` — so a custom theme picks the right side for free, with no list to keep in step.
+This is why they are not `THEME_LIGHT` entries: nobody should be editing them, and that map takes
+plain hex rather than `rgba`.
+
+**Hover lifts, selection does not.** A hovered card takes a 2px accent ring (an inset outline) plus
+`--card-lift`; a selected card keeps its 3px ring and no second, thinner one. What separates the two
+states is the **lift**, not one pixel of width. `--card-lift` themes only its *colour* — `light-dark()`
+returns a `<color>`, not a whole shadow — so one geometry reads as a drop shadow under a light card
+and a pale glow around a dark one, since a drop shadow is nearly invisible on a dark ground. Neutral
+rather than accent-tinted: a blue halo is close to what *selected* means, and a grid of them would
+compete with the one card actually selected.
+
+> **Never a thicker border for a state.** A border that changes width reflows the card and nudges its
+> neighbours as the pointer sweeps the grid. Use an inset outline, which paints inside the box that
+> already exists — the selected state and the filmstrip's current item both already do.
+>
+> And **scope the hover ring off `.selected`**: the hover rule sits later in the file, so at equal
+> specificity a selected card under the pointer would drop to the thinner ring. Same source-order
+> trap the grid card's gold star hit in August.
+
+**The marks scale with the card.** `--card-badge-h` is 16px at Small and Medium, 20px on
+`.grid.cards-lg` (256) and 24px on `.grid.cards-xl` (512). It was flat at every size, so a badge
+went from 12.5% of a Small card to 3.1% of an Extra-large one — the author, on Large: *"they
+seem...small"*. Everything at a card's foot derives from it: both bottom clusters, the selection
+check, the star and its svg, the label band, and the insets that keep them clear of each other. The
+glyph inside a badge is `calc(--card-badge-h - --space-1)`, which is 12px at the base — exactly the
+`--glyph-xs` it replaced, so nothing moves until the card does.
+
+> **A derived token must be declared where the override can reach it.** `--card-label-h` was written
+> on `:root` as `var(--card-badge-h)`, and a custom property is substituted where it is *declared*,
+> not where it is read — so it resolved against the base 16px once and inherited that number straight
+> past `.grid.cards-lg`. The band stayed 16 while the badges grew. It is declared on `.card` and
+> `.strip-item` instead. Caught by measuring a rendered band; the token alone looked right.
+
+**The card's chrome is not the overlay's.** `--scrim-strong` still backs the modal backdrop and the
+detail view's own caption, and stays dark in both presets — those dim the whole app, or sit on the
+detail view's `--img-bg` letterbox, which is absolute. Reaching for `--scrim` on a card is what this
+separation exists to stop: the furniture was authored dark-on-anything, which recedes on a dark UI
+and turns into high-contrast blocks on a light one.
+
+**One ground, three surfaces.** The grid, the filmstrip and the detail view all letterbox against `--bg`, so moving between them never changes what sits behind a picture. `--img-bg` is now an alias of `--bg` rather than an absolute near-black: it made the detail pane a dark slab inside a light UI, and even in the dark theme it was a *second*, darker black, so the picture sat in a visible rectangle of its own. The detail view's own chrome — nav, close, the maximised caption — takes the same treatment as the card's, because it sits on the same picture.
+
+The grid's letterbox is `--bg`: `object-fit: contain` means anything that is not square
+shows bars, and the badges sit in the corners — which for most pictures *is* bar, not picture. It
+was `--bg` until 2026-09-15, so the light preset turned those bars near-white and the 1.5px white
+edge ring every badge then carried simply vanished. The grid and the detail view now letterbox
+against the same value. **That ring is gone** — with the ground reliably dark the scrim carries the
+badge on its own, and a white outline around every mark was reading as a button. If a badge ever
+does disappear on a pale thumbnail, the answer is a stronger scrim, not an outline.
+
+Two further rules the same day's faults produced:
+
+- **Translucent shapes must not overlap.** ONE scrim is the shared badge recipe and is fine; the
+  fault was stacking. The set mark was three 78%-black squares on a diagonal, and where two met the
+  alpha compounded to 95%. On a near-black ground both read as black, which is why it looked right
+  for a year.
+- **A mark must survive having its colour removed.** The star and the selection check already did,
+  by being outline-versus-filled. The set mark carried its meaning in density alone and did not.
+- **Fill carries meaning, never emphasis.** Every icon token is stroked except `--icon-star-on`,
+  which is filled because filled is what *favourited* means once you take the colour away — it is
+  the solid half of a deliberate pair. `--icon-play` was filled too, by media-player convention
+  rather than by anything the app needed, and it sat in one badge cluster beside the stroked set
+  mark: one solid glyph against one drawn one. Both it and the music note's noteheads are stroked
+  now, so the cluster is one weight. Reach for the scrim or the size when something needs to be
+  louder. `tests/test_media_marks.py` fails on any new filled glyph.
+- **Don't draw what the icon set already has.** The set mark was rebuilt twice in one day — first as
+  two opaque cards, which fixed the compounding and was still wrong: a pale fill is the loudest
+  thing on a dark card, and a CSS rectangle with a box-shadow reads SOFT beside 2px strokes drawn to
+  a spec. It is Lucide `layers` in the standard scrim pill now, so it is a sibling of ▶ rather than
+  its own kind of object. **A bespoke mark needs a reason the vendored set cannot serve**, and
+  "several pictures" was not one. `tests/test_media_marks.py` checks the glyph has a vendored source
+  file, so a retyped path fails.
 
 ### Badges, tags, labels
-`--reward-bg #e0b23a` + `--reward-fg (=--bg)` (quality badge) · `--tag-fav #e0b83a` ·
+`--reward-bg #e0b23a` + `--reward-fg` (*computed*, see above) (quality badge) · `--tag-fav #e0b83a` ·
 `--chip-exclude #8a4a4a` · `--badge-fg #ffd479` ("no meta") · `--cap-fg #d7dbe2` (card caption) ·
 `--chip-x-hover` / `--chip-x-hover-excl`.
 

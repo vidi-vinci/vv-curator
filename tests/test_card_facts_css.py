@@ -50,6 +50,16 @@ root = re.search(r':root\s*\{(.*?)\n\}', CSS, re.S)
 for m in re.finditer(r'(--[\w-]+):\s*([^;]+);', root.group(1) if root else ''):
     tokens[m.group(1)] = m.group(2).strip()
 
+# AND THE TOKENS DECLARED ON `.card` ITSELF, which is where the ones that must follow the card size
+# live. A custom property is substituted where it is DECLARED, so anything derived from
+# --card-badge-h has to sit inside the scope that .grid.cards-lg overrides -- on :root it would
+# resolve against the base size once and never see the override. --card-label-h moved here on
+# 2026-09-15 for exactly that reason, and reading only :root would leave this test unable to see it
+# at all, which is how it started failing the moment the derivation became real.
+for m in re.finditer(r'(?:^|\n)\.card\s*\{([^{}]*)\}', CSS):
+    for t in re.finditer(r'(--[\w-]+):\s*([^;]+);', m.group(1)):
+        tokens.setdefault(t.group(1), t.group(2).strip())
+
 # --card-bottom-inset is declared on `.card`, NOT on :root, because it has two values: a labelled
 # card lifts everything at its foot clear of the label band, an unlabelled one keeps the tighter
 # inset. Both are read here so the arithmetic below can be checked against each -- resolving only

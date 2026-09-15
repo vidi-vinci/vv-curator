@@ -1749,7 +1749,7 @@ function cardHTML(it) {
   const motion = (it.motion || it.is_video || it.is_audio || paired)
     ? `<span class="motion-badge${it.is_audio ? ' song' : ''}" title="${playKind}"></span>` : '';
   const setBadge = (it.is_set || paired)
-    ? `<span class="set-badge" title="${paired ? 'Video set — still + video (opens the video)' : 'Image set — open to keep one, recycle the rest'}"><i></i></span>` : '';
+    ? `<span class="set-badge" title="${paired ? 'Video set — still + video (opens the video)' : 'Image set — open to keep one, recycle the rest'}"></span>` : '';
   const pattr = paired ? ` data-video-id="${it.video_id}" data-members="${it.group_members || ''}"`
     : (it.is_set ? ` data-members="${it.group_members || ''}"` : '');
   // Curation label: a colored band along the bottom edge carrying the label's NAME (absent when
@@ -2887,7 +2887,7 @@ function stripItemHTML(it, i) {
       stripMarks(
         vid || it.is_audio ? `<span class="strip-play${it.is_audio ? ' song' : ''}"></span>` : '',
         (it.is_set || paired)
-          ? `<span class="set-badge" title="${paired ? 'Video set — still + video (opens the video)' : 'Image set — open to keep one, recycle the rest'}"><i></i></span>` : ''
+          ? `<span class="set-badge" title="${paired ? 'Video set — still + video (opens the video)' : 'Image set — open to keep one, recycle the rest'}"></span>` : ''
       ) +
       // THE MARKS YOU CURATE BY, carried through from the grid. The author, 2026-09-05: reviewing means
       // leaning on the favourite and the label, and both vanished the moment you opened an image —
@@ -4961,8 +4961,14 @@ const THEME_LIGHT = {
   // --star is deliberately UNCHANGED. Darkening gold far enough to clear 3.0 lands on #b78216,
   // which is not gold any more; it gets --star-edge instead, a rim, which is what WCAG's 3.0 asks
   // for on a component to begin with. The author's call after seeing both.
+  // --star IS NO LONGER HERE, and that is deliberate. It was #d99a1a, a gold darkened to carry
+  // itself against a pale page -- but the star's main home is the corner of a PICTURE, and a
+  // picture is not themed, so the light value made it worse exactly where it is used most. The rim
+  // added earlier today is what makes leaving it alone possible: the gold stays #ffca3a everywhere
+  // and --star-edge carries the 3:1 on whatever themed surface it lands on. One value, both jobs,
+  // instead of a token that was quietly serving two.
   '--accent': '#2061d3', '--active': '#2c9649', '--danger': '#c42b2b',
-  '--success': '#23763a', '--star': '#d99a1a', '--modified': '#8f5d0c',   // 4.6:1 on the light rail
+  '--success': '#23763a', '--modified': '#8f5d0c',   // 4.6:1 on the light rail
 };
 let _themeEdit = {};   // working overrides while the Appearance tab is open
 // Apply overrides live; a token absent from `obj` reverts to its CSS default.
@@ -4994,6 +5000,10 @@ function applyTheme(obj) {
   // floor for a graphical object, while near-black on it is 8.2:1. --on-accent was wrong here and
   // inkOn already knew.
   s.setProperty('--active-ink', inkOn(tokenHex('--active')));
+  // And the Quality badge, which needs it more than either: it is gold in both themes and sits on
+  // a PICTURE, so an ink that followed the page read at 1.85:1 in the light preset. Same treatment
+  // as the labels because it has the same shape -- a user-editable ground with text on it.
+  s.setProperty('--reward-bg-ink', inkOn(tokenHex('--reward-bg')));
 }
 // The five label tokens, read off the theme editor's own grouping so there is one list, not two.
 const LABEL_TOKENS = (THEME_GROUPS.find(([g]) => g === 'Labels') || [, []])[1];
@@ -7344,6 +7354,10 @@ function applyCardSize(px) {
   // on/off, and `container-type` on .card would create a stacking context per card AND silently
   // wake a dormant @container rule that has .song-face as its subject. Still pure CSS reflow.
   $('#grid').classList.toggle('cards-lg', px >= 256);
+  // And a second step at Extra-large, for the card marks only: --card-badge-h was flat at every
+  // size, so a badge went from 12.5% of a Small card to 3.1% of this one. cards-lg cannot do both
+  // jobs -- it also turns the second facts tier on, which XL does not want twice.
+  $('#grid').classList.toggle('cards-xl', px >= 512);
   document.querySelectorAll('#cardSize button').forEach(b =>
     b.classList.toggle('active', Number(b.dataset.size) === px));
   try { localStorage.setItem(CARD_SIZE_KEY, String(px)); } catch (e) {}

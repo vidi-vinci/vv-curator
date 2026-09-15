@@ -59,9 +59,16 @@
      clears the bar) does not read as gold at all. The author's call, 2026-09-15.
      A mix of --star rather than a hex, so a re-coloured star brings its own rim. Unconditional: in
      the dark theme the star is already 11.87:1 and the rim is definition rather than contrast. */
-  --star-edge: color-mix(in srgb, var(--star), #000 35%);
+  --star-edge: color-mix(in srgb, var(--star), #000 40%);
   --reward-bg: #e0b23a;      /* quality (pyiqa) badge background */
-  --reward-fg: var(--bg);    /* quality badge text (dark on gold) */
+  /* --reward-fg WAS var(--bg), and that was a real bug rather than a stylistic one: the badge is
+     gold in BOTH themes, but its ink followed the page, so it measured 9.14:1 in dark and 1.85:1
+     in light -- near-white text on gold, on a badge that sits on a picture. A themed ink on an
+     unthemed ground. It is COMPUTED now, by the same inkOn() that gives every curation label a
+     readable ink, and for the same reason: --reward-bg is user-editable, so no authored value is
+     right for a gold someone may replace with a navy. The fallback is correct for the shipped
+     gold, and only applies before applyTheme has run. */
+  --reward-fg: var(--reward-bg-ink, #10141a);
   --tag-fav: #e0b83a;        /* Favorites row label */
   --label-publish: #45b06a;    /* curation label: To publish (green) */
   --label-published: #4a86c5;  /* curation label: Published (blue) */
@@ -69,7 +76,13 @@
   --label-explore: #9a6ff0;    /* curation label: To explore (purple) */
   --label-video: #3fb8b0;      /* curation label: For video — a still worth animating (teal) */
   --chip-exclude: #8a4a4a;   /* exclude-term chips */
-  --img-bg: #0c0d10;         /* detail image letterbox */
+  /* THE DETAIL VIEW'S LETTERBOX, and it follows the theme for the same reason the grid's does. It
+     was #0c0d10, absolute, which made the detail pane a near-black slab inside a light UI -- and
+     even in the DARK theme it was a second, darker black inside --bg, so the picture sat in a
+     visible rectangle of its own. The author, testing: "dark mode in detail view still shows black
+     letterboxing." One surface, one ground: the grid, the filmstrip and the detail view now all
+     letterbox against --bg, so moving between them does not change what is behind a picture. */
+  --img-bg: var(--bg);
   --badge-fg: #ffd479;       /* "no meta" corner badge text */
   --cap-fg: #d7dbe2;         /* card filename caption */
   --chip-x-hover: #ffe08a;        /* chip remove-× hover (include) */
@@ -143,25 +156,65 @@
   --icon-trash: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 11v6'/%3E%3Cpath d='M14 11v6'/%3E%3Cpath d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6'/%3E%3Cpath d='M3 6h18'/%3E%3Cpath d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/%3E%3C/svg%3E");
   /* FILLED, unlike the vendored outline. A 16px outline triangle at 2px stroke is mostly stroke, and
      this mark sits on a photograph where a solid shape reads and a hollow one does not. */
-  --icon-play: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z'/%3E%3C/svg%3E");
+  --icon-layers: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z'/%3E%3Cpath d='M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12'/%3E%3Cpath d='M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17'/%3E%3C/svg%3E");
+  --icon-play: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z'/%3E%3C/svg%3E");
   /* FILLED heads, same reasoning as the play triangle: at 16px a hollow note is mostly stroke. */
-  --icon-music: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='6' cy='18' r='3' fill='%23000'/%3E%3Ccircle cx='18' cy='16' r='3' fill='%23000'/%3E%3Cpath d='M9 18V5l12-2v13'/%3E%3C/svg%3E");
+  --icon-music: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Ccircle cx='18' cy='16' r='3'/%3E%3Cpath d='M9 18V5l12-2v13'/%3E%3C/svg%3E");
   --radius: 10px;             /* cards */
   --radius-modal: 14px;       /* modal/overlay panels */
+  /* THE BASE. Everything at a card's foot is sized from this -- both bottom clusters, the selection
+     check, the star, the label band, and the insets that keep them clear of each other. It STEPS UP
+     with the card, further down, because it was a flat 16px at every size: 12.5% of a Small card and
+     3.1% of an Extra-large one, which is why the author said the icons "seem...small" while looking
+     at Large. A mark that does not scale with the thing it marks gets quietly smaller the bigger you
+     make the grid. */
   --card-badge-h: 16px;       /* height of the corner badges/icons on a grid card (both bottom clusters) */
-  --card-label-h: 16px;       /* height of the curation-label band along a card's bottom edge. One badge
-                                 tall on purpose: everything else at the card's foot is sized from
-                                 --card-badge-h, so the band lines up with them instead of being its own
-                                 number. It was 5px and wordless until the band had to carry its name. */
+  /* One badge tall, and DERIVED rather than a literal that happens to match -- the comment here
+     always said the band lines up with the marks beside it, and it was 16px written twice, so the
+     first time the badge moved they disagreed. It was 5px and wordless until the band had to carry
+     its name.
+     DECLARED ON .card AND .strip-item, NOT HERE, and that is not a style preference. A custom
+     property is substituted where it is DECLARED: written on :root this resolved against the base
+     --card-badge-h once, 16px, and the computed 16px then inherited down past the .grid.cards-lg
+     override without ever looking at it again. The band stayed 16 while the badges went to 20 and
+     24 -- exactly the disagreement this derivation was meant to prevent, arriving by a subtler
+     door. Declaring it on the elements inside the override makes it re-resolve there. */
   --card-min: 192px;          /* grid card IMAGE box (set by the sidebar S/M/L control); a multiple of 16
                                  so the 384px cached thumbnail downscales on a clean ratio (192=2×, 128=3×) */
   --set-indent: var(--space-4);   /* Settings: how far a section's rows sit in from its heading */
-  --card-badge-edge: 0 0 0 1.5px var(--edge-soft);   /* light edge ring (reads as a subtle glow) shared by every card badge */
   /* scrims (image/overlay darkening) + edge highlights + pop shadow */
+  /* ---- THE CARD'S OWN CHROME -------------------------------------------------------------------
+     A name this concept never had, which is why it drifted. The facts bar, the corner badges, the
+     caption, the zoom and the selection check are the app's furniture laid over someone's picture,
+     and they were all authored as dark-on-anything: a black scrim with white ink. On a dark UI that
+     recedes until you want it. On the light preset the identical furniture becomes high-contrast
+     dark blocks on white, and the author said so looking at the two side by side: "it works, but it
+     still feels far more busy to me than the dark mode."
+     THE RULE THIS SETTLES: a mark must carry its own ground -- and once it does, that ground may
+     follow the theme, because the mark is no longer relying on what is behind it. The star is the
+     exception and stays absolute, because it has no ground at all, only a rim.
+     light-dark() rather than a THEME_LIGHT entry, because these are not colours anyone should be
+     editing and rgba is not the plain hex that map takes. It resolves against `color-scheme`, which
+     applyTheme already sets from the EFFECTIVE --bg -- so a custom theme picks the right side of
+     each pair for free, with no list to keep in step. The dark halves are byte-identical to what
+     shipped, so the dark theme does not move. */
+  /* THE HOVER LIFT. A drop shadow is nearly invisible on a dark UI, so the dark half is a pale
+     GLOW instead -- the author's suggestion, and the standard way to show elevation on a dark
+     ground. Only the COLOUR is themed: light-dark() returns a <color>, not a whole shadow, so one
+     geometry serves both and reads as a shadow under a light card and a halo around a dark one.
+     NEUTRAL rather than accent-tinted: a blue halo is close to what "selected" means elsewhere, and
+     a grid full of them would compete with the one card actually selected. */
+  --card-lift: light-dark(rgba(18,32,56,.20), rgba(255,255,255,.13));
+  --card-scrim:        light-dark(rgba(255,255,255,.74), rgba(0,0,0,.6));
+  --card-scrim-soft:   light-dark(rgba(255,255,255,.55), rgba(0,0,0,.4));
+  --card-scrim-strong: light-dark(rgba(255,255,255,.86), rgba(0,0,0,.78));
+  --card-ink:          light-dark(#2a2f36, #ffffff);
+  --card-edge:         light-dark(rgba(0,0,0,.6),  rgba(255,255,255,.85));
+  --card-edge-soft:    light-dark(rgba(0,0,0,.38), rgba(255,255,255,.5));
   --scrim: rgba(0,0,0,.6);          /* card control backgrounds (zoom, score, badge) */
   --scrim-strong: rgba(0,0,0,.78);  /* full overlays (detail bg, caption gradient) */
-  --scrim-dim: rgba(0,0,0,.5);      /* nav / close buttons */
-  --scrim-heavy: rgba(0,0,0,.75);   /* nav hover */
+  --scrim-dim: light-dark(rgba(255,255,255,.66), rgba(0,0,0,.5));      /* nav / close buttons, over the picture */
+  --scrim-heavy: light-dark(rgba(255,255,255,.88), rgba(0,0,0,.75));   /* nav hover */
   --scrim-soft: rgba(0,0,0,.4);     /* selection check background */
   --scrim-busy: rgba(0,0,0,.12);    /* WORKING tier, paired with the blur below. Light on purpose:
                                        the blur is what says "busy", so the tint only has to take
@@ -1171,7 +1224,7 @@ button.done { --ico: var(--icon-check); }
    Same mask idea as .has-ico, but with no label to sit beside — so the size is the component's, not
    a shared default. Each rule below says which and why. */
 .card .zoom::before, .card .motion-badge::before, .strip-item .strip-play::before,
-.card-br .note-badge::before, .offline-badge::before {
+.card-br .note-badge::before, .offline-badge::before, .set-badge::before {
   content: ''; display: block; background: currentColor;
   -webkit-mask: var(--ico) center / contain no-repeat;
           mask: var(--ico) center / contain no-repeat;
@@ -1182,8 +1235,11 @@ button.done { --ico: var(--icon-check); }
 .card .zoom { --ico: var(--icon-maximize); --ico-size: var(--glyph-xl); }
 /* The three small marks that sit in a --card-badge-h pill or on a thumbnail: one step down, so the
    mark has room inside its own badge instead of filling it edge to edge. */
-.card .motion-badge, .strip-item .strip-play, .card-br .note-badge, .offline-badge {
-  --ico-size: var(--glyph-xs);
+.card .motion-badge, .strip-item .strip-play, .card-br .note-badge, .offline-badge, .set-badge {
+  /* DERIVED from the badge box rather than named, so a bigger badge gets a bigger glyph instead of
+     the same 12px mark floating in more scrim. At the 16px base this is 12px, which is what
+     --glyph-xs was here before, so nothing moves until the card does. */
+  --ico-size: calc(var(--card-badge-h) - var(--space-1));
 }
 .card .motion-badge, .strip-item .strip-play { --ico: var(--icon-play); }
 /* A song's mark is a note, not a triangle: the badge answers "what is this", and ▶ on a card that
@@ -1743,10 +1799,10 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
   display: flex; align-items: center; justify-content: center;
   opacity: 0; transition: opacity .12s;
 }
-.card .star svg { width: var(--glyph-sm); height: var(--glyph-sm); }
+.card .star svg { width: var(--card-badge-h); height: var(--card-badge-h); }
 
 /* favorite — top right */
-.card .star { right:var(--space-2); color: var(--edge-soft); }
+.card .star { right:var(--space-2); color: var(--card-edge-soft); }
 /* No badge scrim, unlike its neighbours on the left: this one carries a drop shadow instead, so a
    pale outline stays legible over a bright thumbnail without putting a filled box in the corner of
    every picture. A literal, and allowed to be one — every --shadow-* token is a BOX shadow, and one
@@ -1777,7 +1833,7 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
    click not having taken: The author, 2026-08-28, "the star turns white until I release the mouse. just
    make it yellow." Same guard .mark-toggle and .copy-ic already carry; the card was the one place
    missing it. */
-.card .star:not(.on):hover { color: var(--edge); }
+.card .star:not(.on):hover { color: var(--card-edge); }
 /* AND THE GOLD STATE GETS ITS OWN STEP. Scoping the hover off .on stopped it painting white, and
    left it ignoring the pointer entirely -- which this note's own rule calls out: a mark that does
    not react "reads as decoration rather than a control". The author, 2026-08-28: "the star still needs a
@@ -2013,7 +2069,22 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
      grew to hold a word, that silent agreement broke in three places at once. */
   --card-bottom-inset: var(--space-2);
 }
+.card { --card-label-h: var(--card-badge-h); }
 .card:has(.label-strip) { --card-bottom-inset: calc(var(--card-label-h) + var(--space-1)); }
+/* THE LETTERBOX FOLLOWS THE THEME, and the detour that says why is worth keeping. `contain` means
+   anything not square shows bars, and the card's badges sit in the corners -- which for most
+   pictures is bar, not picture. In the light preset those bars are near-white, and on 2026-09-15
+   every mark on a card looked wrong there: "the overlay icons in grid view do NOT work as well in
+   light mode." So this was pinned to --img-bg, near-black in both themes, and the author looked at
+   it: "the dark letterbox just looks like a broken light mode."
+   He was right, and the first diagnosis was aimed one layer too low. What actually broke in light
+   mode was the 1.5px WHITE EDGE RING every badge carried: on a near-white bar it simply vanished,
+   and the old set mark, whose legibility rested entirely on it, went with it. The ring is gone now
+   (it read as a button outline), and a bare scrim badge does not care what is behind it -- on a
+   near-white bar it lands 5.62:1 against its ground with the glyph at 6.02:1 on top.
+   The measurement that settles it: against the near-BLACK letterbox the same badge separated from
+   its ground at 1.05:1. Pinning the bars dark was making the marks harder to pick out, not easier.
+   The star is the one mark with no scrim, and --star-edge is what carries it on a pale bar. */
 .card img { width: 100%; height: 100%; object-fit: contain; display: block; background: var(--bg); }
 
 /* ---- Song face: a drawn card, standing in for the thumbnail audio doesn't have ----------------
@@ -2203,7 +2274,7 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
 }
 .card .zoom {
   position: absolute; top:50%; left:50%; transform: translate(-50%, -50%); z-index: 3;
-  background: var(--scrim); color: var(--on-accent); border: none; border-radius: var(--radius-field);
+  background: var(--card-scrim); color: var(--card-ink); border: none; border-radius: var(--radius-field);
   padding:var(--space-2) var(--space-3); font-size: var(--glyph-xl); line-height: 1; cursor: pointer;
   opacity: 0; transition: opacity .12s;
 }
@@ -2220,12 +2291,11 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
 }
 /* the edge ring is an ICON treatment (▶ / set / ✎): the note badge keeps it; the quality
    pill sits on a solid color and doesn't need the extra pop, so it skips it. */
-.card-br .note-badge { box-shadow: var(--card-badge-edge); }
 .card-br .reward { min-width: 34px; }
 /* "has a note" indicator — a small glyph badge stacked under the quality chip */
 .note-badge {
   padding:1px var(--space-1); border-radius: var(--radius-xs); font-size: var(--text-xs); line-height: 1.4;
-  background: var(--scrim); color: var(--on-accent);
+  background: var(--card-scrim); color: var(--card-ink);
 }
 /* Card corner clusters: info badges live in the two bottom corners (selection ✓ stays top-left,
    favorite ★ stays top-right). */
@@ -2362,7 +2432,7 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
      24px square was a soft corner, and the same 6px on 16px is a quarter of the side, which reads
      as a lozenge rather than a checkbox. Shrinking a component means re-reading its radius. */
   left:var(--space-2); border-radius: var(--radius-xs);
-  border: 2px solid var(--edge); background: var(--scrim-soft);
+  border: 2px solid var(--card-edge); background: var(--card-scrim-soft);
   /* `transparent` hides the tick without hiding the box — the empty checkbox is the unselected
      state, so the border and fill must stay. It works on the mask below for the same reason it
      worked on the character it replaced: the mark is painted with currentColor. */
@@ -2382,7 +2452,7 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
    is two changes and a state preview where every other control in the app moves one thing. The box
    is over a photograph, so the step is on the scrim rather than to --bg3 the way the rail's controls
    do — same idea, a surface that works where it sits. */
-.card .check:hover { background: var(--scrim); }
+.card .check:hover { background: var(--card-scrim); }
 .card.selected img { filter: brightness(.82); }
 
 /* reusable confirm/alert/prompt dialog (styled to match the app) */
@@ -2584,8 +2654,8 @@ button.danger { border-color: var(--danger); color: var(--danger); }
 button.danger:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--danger); color: var(--on-accent); }
 .card .cap {   /* filename label, top-left just under the selection check; fades in on hover */
   position: absolute; top:var(--space-8); left:var(--space-2); right:var(--space-2);
-  padding:var(--space-half) var(--space-2); font-size: var(--text-xs); color: var(--cap-fg);
-  background: var(--scrim-strong); border-radius: var(--radius-sm);
+  padding:var(--space-half) var(--space-2); font-size: var(--text-xs); color: var(--card-ink);
+  background: var(--card-scrim-strong); border-radius: var(--radius-sm);
   opacity: 0; transition: opacity .12s;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
@@ -2627,7 +2697,7 @@ button.danger:hover:not(:disabled):not([aria-disabled="true"]) { background: var
      marks already sit on, so the band carries the same weight as the ▶ badge beside it
      rather than a value of its own. .cap keeps the stronger one -- it is a filename, which
      has to stay readable over anything, where these are numbers you scan. */
-  background: var(--scrim); color: var(--cap-fg);
+  background: var(--card-scrim); color: var(--card-ink);
   border-radius: var(--radius-sm);
   font-size: var(--text-xs); line-height: 1.3;
   /* Never hit-testable, and that is load-bearing twice: the card is an <a> whose whole face must
@@ -2662,19 +2732,38 @@ button.danger:hover:not(:disabled):not([aria-disabled="true"]) { background: var
 .card .card-facts .cf-hover { display: none; }
 .card:hover .card-facts .cf-hover { display: block; }
 .grid.cards-lg .card .card-facts { display: flex; }
+/* THE MARKS STEP UP WITH THE CARD. Same two thresholds the thumbnail sizes use -- Large is 256 and
+   Extra-large 512 -- so a badge stays roughly 8% of the card instead of shrinking from 12.5% to
+   3.1% as you grow the grid. One declaration each: every mark at the card's foot derives from
+   --card-badge-h, including the label band and the insets, so they all follow. */
+.grid.cards-lg { --card-badge-h: 20px; }
+.grid.cards-xl { --card-badge-h: 24px; }
 /* A song's face already draws its duration, tempo and key — the same reason .cap is off there. */
 .card:has(.song-face) .card-facts { display: none; }
-.card:hover { border-color: var(--accent); }
+/* HOVER LIFTS; SELECTION DOES NOT. The 1px border only changed COLOUR on hover, which on the light
+   preset is one thin line of #2061d3 and reads as almost nothing -- the author: "I feel like a
+   slightly stronger border would be good for the active/highlighted card."
+   AN INSET OUTLINE, NEVER A THICKER BORDER. A border that changes width reflows the card and nudges
+   its neighbours as the pointer sweeps the grid; an outline paints inside the box it already has.
+   The selected state and the filmstrip's current item both already work this way.
+   SCOPED OFF .selected, and it has to be: this rule sits LATER in the file than
+   `.card.selected { outline: 3px }`, so at equal specificity a selected card under the pointer
+   would drop to the thinner ring -- the same source-order trap the grid card's gold star hit on
+   2026-08-28. Selection keeps its 3px; what separates the two states is the LIFT, not one pixel of
+   width. The author, asked whether selection should go to 4px: "selection should NOT have a glow,
+   just a good solid border." So a selected card still lifts when you point at it, because it is
+   also the one you are pointing at -- it just does not get a second, thinner ring. */
+.card:hover { border-color: var(--accent); box-shadow: 0 3px 16px var(--card-lift); }
+.card:hover:not(.selected) { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* Video / animated-media indicator: a small ▶ pill in the bottom-left cluster. */
 .card .motion-badge {
   flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
   height: var(--card-badge-h); min-width: var(--card-badge-h); padding:0 var(--space-1) 0 var(--space-1); border-radius: var(--radius-xs);
-  background: var(--scrim); color: var(--on-accent); font-size: var(--text-xs); line-height: 1;
-  box-shadow: var(--card-badge-edge); pointer-events: none;
+  background: var(--card-scrim); color: var(--card-ink); font-size: var(--text-xs); line-height: 1;
+  pointer-events: none;
 }
-/* Set indicator: three stacked cards drawn with pseudo-elements + one child <i> (no icon font, no
-   count). Shown for any collapsed set — image sets and video sets alike; a video set pairs it with
-   the ▶ badge. Diagonal stack from back (upper-right) to front (lower-left).
+/* Set indicator. Shown for any collapsed set — image sets and video sets alike; a video set pairs
+   it with the ▶ badge.
 
    UNSCOPED, because it is a component and not a card part. It was written as `.card .set-badge`
    and that scoping was itself the bug the author reported on 2026-09-04: the detail view's filmstrip
@@ -2682,21 +2771,40 @@ button.danger:hover:not(:disabled):not([aria-disabled="true"]) { background: var
    the moment you opened it. The two views disagreeing about what an item IS is exactly what the
    design system exists to prevent, so the answer is one component both surfaces use rather than a
    second copy for the strip. */
+/* LUCIDE `layers`, IN THE SAME PILL AS EVERY OTHER CARD MARK. Rewritten twice on 2026-09-15, and
+   both attempts are worth keeping because each one taught the next.
+
+   WHAT WAS HERE ORIGINALLY: three squares at --scrim-strong (78% black) overlapping on a diagonal.
+   Two faults, and the first hid the second. Translucent shapes that OVERLAP compound -- where two
+   leaves met, 78% over 78% composites to 95% -- so a 16px mark held three densities. Against a
+   near-black letterbox 78% and 95% are both simply black, which is why it read as one clean stack
+   for a year; against the light preset's near-white bars they land at #363738 and #0c0c0c, and the
+   author said so at once: "the set icon also looks complex... does it have transparency?"
+   Underneath that it carried its meaning in DENSITY alone, so it was the one card mark that failed
+   the black-and-white test the star and the selection check were built to pass.
+
+   THE ATTEMPT IN BETWEEN was two opaque rectangles, pale card in front of a darker one, shaped like
+   a picture. It fixed the compounding and it was wrong anyway: a near-white fill is the loudest
+   thing on a dark card, so the quietest badge became the shoutiest. "right away, dark mode (my
+   default) does NOT work for me". It also looked SOFT, which is the deeper point -- a CSS rectangle
+   with a box-shadow cannot match a 2px stroke drawn to a spec, and every other mark here is one.
+
+   SO IT IS AN ICON NOW, like its neighbours, and a vendored one rather than a drawn one: the app
+   already ships Lucide, `layers` was already in app/vendor/lucide/, and the token above is built
+   from that file rather than retyped. It sits in the same scrim pill as the video badge, at the
+   same --glyph-xs, with the same edge ring -- so the set mark is a SIBLING of ▶ instead of its own
+   kind of object, which is what the design system asks for and what three attempts at a bespoke
+   stack kept failing to be. The author, choosing: "layers is my fave honestly."
+   Nothing here overlaps and nothing is translucent except the one scrim, which is the shared
+   recipe. `images` was the semantically better word and lost on sight; `files` and `copy` both
+   "look like copy", which is the reading a set mark must not have. */
 .set-badge {
-  position: relative; width: var(--card-badge-h); height: var(--card-badge-h);
-  flex: 0 0 auto; pointer-events: none;
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+  height: var(--card-badge-h); min-width: var(--card-badge-h); border-radius: var(--radius-xs);
+  background: var(--card-scrim); color: var(--card-ink);
+  pointer-events: none;
+  --ico: var(--icon-layers);
 }
-/* each card is half the badge box; the stack steps by a quarter, so it scales with --card-badge-h */
-.set-badge::before, .set-badge::after, .set-badge i {
-  content: ''; position: absolute; width: 50%; height: 50%;
-  /* --radius-2xs, not --radius-xs: the leaf is HALF of --card-badge-h, so 4px here was 50% of
-     its 8px side and drew a circle. This is the quarter-side cap at 8px. */
-  border-radius: var(--radius-2xs); background: var(--scrim-strong);
-  box-shadow: var(--card-badge-edge);   /* light edge ring, shared by all card badges */
-}
-.set-badge::before { top:0;   right:0;   z-index: 1; }   /* back card */
-.set-badge i       { top:25%; right:25%; z-index: 2; }   /* middle card */
-.set-badge::after  { top:50%; right:50%; z-index: 3; }   /* front card (paints on top) */
 
 /* ---- curation labels: exclusive one-key disposition marks (To publish / Published / …) ---- */
 /* The `-ink` half of each pair is COMPUTED, not authored: applyTheme() sets it to whichever of a
@@ -3020,7 +3128,7 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
 .maxi-cap { position: absolute; left:0; right:0; bottom:0; z-index: 3;
   display: flex; flex-direction: column; gap: var(--cap-gap);
   padding: var(--space-1) var(--space-3);
-  background: var(--scrim-strong); color: var(--cap-fg); font-size: var(--text-xs); }
+  background: var(--card-scrim-strong); color: var(--card-ink); font-size: var(--text-xs); }
 .maxi-cap.hidden { display: none; }
 /* The facts. A ROW INSIDE THE COLUMN rather than the bar itself being the row, because the K hint
    below it is a second line — the bar was a single flex row until the hint arrived. */
@@ -3041,7 +3149,7 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
 /* ONE LINE, ALWAYS. It now carries three facts, so a narrow window would wrap it — and the bar is
    absolutely positioned over the picture, so a second line grows upward into the image this whole
    mode exists to make bigger. Truncating loses the tail of a hint; wrapping loses pixels. */
-.maxi-cap .cap-hint { color: color-mix(in srgb, var(--cap-fg), #000 30%);
+.maxi-cap .cap-hint { color: color-mix(in srgb, var(--card-ink), var(--card-scrim-strong) 35%);
   height: var(--cap-line); line-height: var(--cap-line);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* --cap-fg and --on-accent, NOT --muted and --fg. The bar's ground is --scrim-strong, which is 78%
@@ -3049,7 +3157,7 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
    #1b1e24 on near-black under the light preset, i.e. an invisible caption for anyone not using the
    dark one. --cap-fg is the app's existing colour for exactly this (the card filename caption over
    the same scrim) and is deliberately not theme-editable. */
-.maxi-cap b { flex: 0 0 auto; color: var(--on-accent); font-weight: 600; }
+.maxi-cap b { flex: 0 0 auto; color: var(--card-ink); font-weight: 600; }
 .maxi-cap .cap-facts { min-width:0; overflow:hidden; white-space:nowrap; text-overflow: ellipsis; }
 .maxi-cap .cap-right { flex: 0 0 auto; margin-left:auto; display:flex; align-items:center; gap:var(--space-2); }
 /* Left column: the filmstrip, the media pane (fills), the auto-saving Notes box, full width. */
@@ -3124,6 +3232,9 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
   position: relative; padding:0; border: none; background: var(--bg3);
   border-radius: var(--radius-sm); overflow: hidden; cursor: pointer;
 }
+/* Same ground as the grid card, for the reason given there: the filmstrip shows the same items and
+   carries the same marks, so a letterbox that differed between the two views would give one mark
+   two appearances. */
 .strip-item img { width: 100%; height: 100%; object-fit: contain; display: block; background: var(--bg); }
 .strip-item:hover { outline: 1px solid var(--border); outline-offset: -1px; }
 /* CURRENT is an inset outline, never a border or a margin: the strip auto-scrolls to keep this item
@@ -3151,6 +3262,7 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
    --space-1. Same rule though — everything at the bottom of a labelled item lifts clear of the
    band together, so the clearance can never fall out of step with the band's height. */
 .strip-item { --strip-bottom-inset: var(--space-1); }
+.strip-item { --card-label-h: var(--card-badge-h); }
 .strip-item:has(.label-strip) { --strip-bottom-inset: calc(var(--card-label-h) + var(--space-1)); }
 /* The drawn song face is padded, not positioned, so it needs the same clearance stated as padding.
    Its title/waveform/length are centred, so an unlabelled item is unchanged and a labelled one
@@ -3173,7 +3285,7 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
 .strip-item .star.on svg { fill: currentColor; }   /* FILLED, not just gold — see .card .star.on */
 .strip-item .strip-play {
   font-size: var(--text-xs); line-height: 1;
-  padding:var(--space-half) var(--space-1); border-radius: var(--radius-xs); background: var(--scrim); color: var(--on-accent);
+  padding:var(--space-half) var(--space-1); border-radius: var(--radius-xs); background: var(--card-scrim); color: var(--card-ink);
 }
 /* The size picker sits OUTSIDE .strip-scroll: inside it, it would scroll away with the thumbnails.
    THE DETAIL VIEW HAS ITS OWN CONTROL SCALE. DESIGN.md's "one control height" is scoped to the
@@ -3351,7 +3463,7 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
 .set-pane .set-key {
   position: absolute; top:var(--space-2); left:var(--space-2); z-index: 2; width: 18px; height: 18px;
   display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm);
-  background: var(--scrim); color: var(--on-accent); font-size: var(--text-xs); font-weight: 600;
+  background: var(--card-scrim); color: var(--card-ink); font-size: var(--text-xs); font-weight: 600;
 }
 /* The pane's quality score, opposite .set-key. .reward carries the gold skin and nothing about
    WHERE it goes (see its own note), so this is placement only -- the same badge the grid card wears,
@@ -3588,7 +3700,7 @@ button.primary.done { background: var(--success); border-color: var(--success); 
    fixed --glyph-sm box, so the arithmetic is the same and no longer depends on a font at all —
    4 + 16 + 4 = 24px = --control-h. */
 .close { position: absolute; top:var(--space-2); right:var(--space-3); z-index: 3;
-  background: var(--scrim-dim); border: none; color: var(--on-accent);
+  background: var(--scrim-dim); border: none; color: var(--card-ink);
   padding: var(--space-1) var(--space-2); }
 /* The global `button:hover { border-color: accent }` is invisible here, because this button has no
    border — so it had no hover at all.
@@ -3617,10 +3729,31 @@ button.primary.done { background: var(--success); border-color: var(--success); 
    what gives the button an edge everywhere else, and --border-control is the app's colour for the
    edge of something you press. Two cues rather than one, because this button has no fixed ground:
    whichever of the two the backdrop defeats, the other still draws it. */
+/* A DRAWN CHEVRON, NOT A TEXT ONE. These were the characters ‹ and › at 32px, and a glyph's ink sits
+   wherever its font puts it inside the line box -- high, for these two -- so the arrow rode above
+   the middle of its button no matter what the box did. The author: "the left/right chevrons in
+   detail mode look off - not sure we need the border, and they are not centered vertically." Both
+   halves of that are one cause: a character cannot be centred, only its line box can.
+   REUSES --chevron, the mask the selects already draw, turned a quarter. One chevron in the app
+   means the arrow beside a dropdown and the arrow beside a picture cannot drift apart, and its 11x7
+   box turns into a 7x11 that is the right proportion for a left/right mark. The colour in that
+   data-URI is irrelevant here: a mask reads alpha only.
+   THE BORDER IS GONE with it. It was --border-control, an edge meant for a control you have to find
+   on a panel; this one sits on a picture with a scrim behind it, which is the whole of what makes
+   it visible. */
 .nav { position: absolute; top:50%; transform: translateY(-50%); z-index: 3;
-  background: var(--scrim-dim); border: none; color: var(--on-accent); font-size: var(--glyph-lg); line-height: 1;
-  box-shadow: inset 0 0 0 1px var(--border-control);
+  display: flex; align-items: center; justify-content: center;
+  background: var(--scrim-dim); border: none; color: var(--card-ink);
   padding:var(--space-2) var(--space-4); border-radius: var(--radius); }
+.nav::before {
+  content: ''; display: block; width: var(--glyph-md); height: var(--glyph-md);
+  background: currentColor;
+  -webkit-mask: var(--chevron) center / contain no-repeat;
+          mask: var(--chevron) center / contain no-repeat;
+}
+/* --chevron points DOWN, so a quarter turn each way gives the pair. */
+.nav.prev::before { transform: rotate(90deg); }
+.nav.next::before { transform: rotate(-90deg); }
 .nav:hover { background: var(--scrim-heavy); }
 /* ANCHORED TO .detail-img, so 50% is the middle of the picture and needs no correcting. This used to
    hang off .detail and carry two compensations — `+ --strip-h / 2` for the filmstrip above, and a

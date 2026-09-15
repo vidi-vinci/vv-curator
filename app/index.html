@@ -1019,7 +1019,7 @@
              navigate. Anchored to .detail they needed an offset for the filmstrip above and a
              clearance for the metadata panel beside — arithmetic that was only ever right in the
              side-by-side layout, and put them across the middle of the page in a narrow window. -->
-        <div class="detail-img"><img id="dImg" alt="" onload="this.classList.add('in')" onerror="this.classList.add('in')"><video id="dVid" class="hidden" controls preload="metadata"></video><div id="dSong" class="song-detail hidden"></div><div id="dSetView" class="set-view hidden"></div><div id="dLoupe" class="loupe"></div><button class="nav prev" id="dPrev" title="Previous (←)">‹</button><button class="nav next" id="dNext" title="Next (→)">›</button><div id="dMaxiCap" class="maxi-cap hidden"></div></div>
+        <div class="detail-img"><img id="dImg" alt="" onload="this.classList.add('in')" onerror="this.classList.add('in')"><video id="dVid" class="hidden" controls preload="metadata"></video><div id="dSong" class="song-detail hidden"></div><div id="dSetView" class="set-view hidden"></div><div id="dLoupe" class="loupe"></div><button class="nav prev" id="dPrev" type="button" title="Previous (←)" aria-label="Previous"></button><button class="nav next" id="dNext" type="button" title="Next (→)" aria-label="Next"></button><div id="dMaxiCap" class="maxi-cap hidden"></div></div>
         <textarea id="dNote" class="detail-note" placeholder="Notes… (auto-saved)" rows="2"></textarea>
       </div>
       <div class="detail-meta">
