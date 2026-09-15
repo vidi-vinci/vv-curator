@@ -108,7 +108,7 @@ console.log('\nJob bar pace clause\n');
   check('without {rate} the clause is ETA only', clause === ' · ETA 23:00', JSON.stringify(clause));
 }
 
-// 7. THE RUN LABEL, added 2026-09-14. Rescanning every library showed "Rescanning Jung (1 of 5)…"
+// 7. THE RUN LABEL, added 2026-09-14. Rescanning every library showed "Rescanning Photos (1 of 5)…"
 //    and nothing else: each library's scan ran silent so the run could own the pill, and silent threw
 //    the progress away as well as the pill — so the file count and the bar were computed every 400ms
 //    and discarded. The author, comparing it to a single library's rescan: "can we include a more detailed
@@ -127,11 +127,11 @@ console.log('\nJob bar pace clause\n');
   check('one library still reads exactly as it did',
     one.text === 'Rebuilding 1,204/9,000 (13%) · 2:10 elapsed · 9/s · ETA 14:02', one.text);
 
-  // In a run the position REPLACES the verb: "Rescanning Jung (1 of 5) Rebuilding 1,204/…" would be
+  // In a run the position REPLACES the verb: "Rescanning Photos (1 of 5) Rebuilding 1,204/…" would be
   // two verbs for one act.
-  const run = scanProgress(s, 'Rebuilding', 'Rescanning Jung (1 of 5)');
+  const run = scanProgress(s, 'Rebuilding', 'Rescanning Photos (1 of 5)');
   check('a run leads with its position instead of the verb',
-    run.text === 'Rescanning Jung (1 of 5) · 1,204/9,000 (13%) · 2:10 elapsed · 9/s · ETA 14:02', run.text);
+    run.text === 'Rescanning Photos (1 of 5) · 1,204/9,000 (13%) · 2:10 elapsed · 9/s · ETA 14:02', run.text);
   check('and still reports a measurable bar', run.pct === 13, String(run.pct));
 
   // Counting is the phase before anything is measurable. It keeps the run's position — a pill that
@@ -139,9 +139,9 @@ console.log('\nJob bar pace clause\n');
   // still shows NO bar, which is what `pct: null` means.
   const counting = { seen: 0, total: 0, elapsed: 3 };
   check('counting keeps the library name in a run',
-    scanProgress(counting, 'Rebuilding', 'Rescanning Jung (1 of 5)').text
-      === 'Rescanning Jung (1 of 5) · Counting files… · 0:03 elapsed',
-    scanProgress(counting, 'Rebuilding', 'Rescanning Jung (1 of 5)').text);
+    scanProgress(counting, 'Rebuilding', 'Rescanning Photos (1 of 5)').text
+      === 'Rescanning Photos (1 of 5) · Counting files… · 0:03 elapsed',
+    scanProgress(counting, 'Rebuilding', 'Rescanning Photos (1 of 5)').text);
   check('counting alone is unchanged outside a run',
     scanProgress(counting, 'Rebuilding').text === 'Counting files… · 0:03 elapsed',
     scanProgress(counting, 'Rebuilding').text);

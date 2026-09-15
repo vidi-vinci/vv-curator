@@ -538,7 +538,7 @@ function clearXTerms() {
 //
 //   `roots` — the library show/hide selection. It escapes because it is SCOPE: which libraries you
 //             are working in, not a search you ran inside them. So Reset must not clear it (the author,
-//             2026-08-20: "I often just work with the local Jung library... but I want to clear
+//             2026-08-20: "I often just work with the local [laptop] library... but I want to clear
 //             filters") and a snapshot must not carry it. The server has always agreed — the roots
 //             clause sits above _filters()'s global-exclusion boundary, so it has never set the
 //             user-filter flag.
@@ -3625,9 +3625,9 @@ function jobPace(s, opts) {
 // — it is the one honest signal that work is happening.
 //
 // Separated from watchScan so a test can lift it; the two must not drift.
-// `runLabel` is the position inside a multi-library run — "Rescanning Jung (1 of 5)". When it is
+// `runLabel` is the position inside a multi-library run — "Rescanning Photos (1 of 5)". When it is
 // given it REPLACES the verb rather than joining it: the run's own sentence already says what is
-// happening, and "Rescanning Jung (1 of 5) Rebuilding 1,204/9,000" is two verbs for one act.
+// happening, and "Rescanning Photos (1 of 5) Rebuilding 1,204/9,000" is two verbs for one act.
 // Without it, every string here is exactly what it was, which is the point — a single library's
 // scan is the thing people already know the look of.
 function scanProgress(s, label, runLabel) {
@@ -7006,7 +7006,7 @@ function clearEmptyHint() {
 }
 // Shown when no library is configured — a hint, not a forced popup.
 //
-// NICK'S WORDING, from his own clean-copy run on 2026-09-07, with one change: he wrote "a root
+// THE AUTHOR'S WORDING, from his own clean-copy run on 2026-09-07, with one change: he wrote "a root
 // folder" and `root` is a word DESIGN.md's glossary forbids showing a user (it is the internal
 // name for the same thing the UI calls a Library). The old text was two sentences using "folder"
 // and "library" for one act and defining neither, which is exactly what he reported.
