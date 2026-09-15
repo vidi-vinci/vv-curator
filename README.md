@@ -155,6 +155,9 @@ But I built it for myself, and I use it every day. Everything here has run again
 existing solution, but nothing suited my needs. This app has helped me finally wrangle my thousands
 of local ComfyUI generations.
 
+It represents months of iterations and refinement, including two earlier versions that I ditched
+before I landed on this overall design.
+
 If you find it useful, great. If it breaks, tell me, and thanks in advance for your patience.
 
 VidiVinci

@@ -208,6 +208,31 @@ why every rule below names whether it means files or cards.
 
 ---
 
+## The detail view: what is a layer, and where the size controls live
+
+Both of these reverse earlier calls, on 2026-09-15, and both turn on the same thing: `z` can now
+switch the magnifier on, where before only the icon could.
+
+- **The magnifier is a SETTING, not a layer, so Escape no longer takes it.** It used to absorb the
+  first Escape, on the reasoning that dropping the lens beats closing the view out from under
+  someone who only wanted the magnifier gone. That was right while pinning meant a deliberate click
+  on the icon, which made a raised lens rare. Tapping `z` makes it the ordinary state of the review
+  flow — set a magnification, then walk the set with `←`/`→` — and a setting must not eat the key
+  that leaves the view. It is now two presses from focus view to the grid whether the lens is up or
+  not. The author's test: *"Easy 2-click back to home view."* Nothing is stranded, because `z`
+  cycles round to off, the icon toggles, and closing the view clears it.
+- **Maximize and shrink are two buttons, split by mode, not one toggle in the corner.** Maximize
+  sits in the actions row beside the magnifier, because it acts on the card you are looking at and
+  that is where that card's controls are. Shrink stays in the window corner beside the ✕. The
+  earlier note called the corner button "the ENTRY point as well as the exit, so the mode is
+  findable without already knowing the `f` key" — the entry is still findable, just next to the
+  other control that changes how you are *looking* rather than where the file goes. **This is not a
+  duplicated control**: maximizing hides the actions row entirely, so exactly one of the pair is
+  ever on screen. It also has to be the corner, not the caption, because video and songs draw no
+  caption.
+
+---
+
 ## Scope
 
 - **DESKTOP ONLY, and mobile is not a gap to close.** The author, 2026-09-08: *"I'm fine to say this app

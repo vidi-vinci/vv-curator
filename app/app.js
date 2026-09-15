@@ -4287,15 +4287,15 @@ const Maxi = (() => {
   }
 
   // The arrows change meaning in a maximized set, so they have to change what they SAY.
+  // The size controls do NOT need this any more: since 2026-09-15 they are two buttons, #dMaxiBtn
+  // in the actions row to go in and #dMaxi in the corner to come out, each visible only in the mode
+  // where its one label is true. The branch that used to rewrite the corner button's title and
+  // aria-label on every toggle went with it.
   function chrome() {
     const setwise = on && !!members();
-    const p = $('#dPrev'), n = $('#dNext'), b = $('#dMaxi');
+    const p = $('#dPrev'), n = $('#dNext');
     if (p) p.title = setwise ? 'Previous in this set (←)' : 'Previous (←)';
     if (n) n.title = setwise ? 'Next in this set (→)'     : 'Next (→)';
-    if (b) {
-      b.title = on ? 'Exit maximized view (F)' : 'Maximize image (F)';
-      b.setAttribute('aria-label', on ? 'Exit maximized view' : 'Maximize image');
-    }
   }
 
   function set(v) {
@@ -4307,7 +4307,11 @@ const Maxi = (() => {
     // The strip was display:none while maximized, so the centring it does on every step ran against
     // a zero-width box. Re-run it on the way OUT, or the strip comes back scrolled to wherever it
     // was when the mode started. Only on a real transition — openDetail already syncs it once.
-    if (was && !on) { syncFilmstrip(); releaseKeepHold(); }   // the hold is a focus-view state only
+    // LEAVING focus view drops the magnifier with it (2026-09-15). The lens is for inspecting one
+    // picture filling the screen; carrying it back out to a view that is mostly metadata means the
+    // next ←/→ lands under a lens nobody asked for. Entering does NOT raise it — going in is not a
+    // request to magnify.
+    if (was && !on) { syncFilmstrip(); releaseKeepHold(); Loupe.off(); }   // both are focus-view state
     Loupe.refresh();
   }
 
@@ -4485,6 +4489,14 @@ const Loupe = (() => {
 
   const el = () => document.getElementById('dLoupe');
   const active = () => pinned || held;
+  // The step readout, created on first use rather than sitting in index.html: it has no meaning
+  // outside a raised lens, and an empty box in the markup is one more thing to remember to hide.
+  function badge() {
+    const lens = el(); if (!lens) return null;
+    let b = lens.firstElementChild;
+    if (!b) { b = document.createElement('div'); b.className = 'loupe-lvl'; lens.appendChild(b); }
+    return b;
+  }
 
   // Where the PICTURE actually is, which is not where the <img> is: object-fit: contain letterboxes
   // it, so the element box is wider or taller than the pixels. Mapping the cursor through the
@@ -4514,9 +4526,18 @@ const Loupe = (() => {
     lens.style.backgroundImage = `url("${img.currentSrc || img.src}")`;
     lens.style.backgroundSize = `${bw}px ${bh}px`;
     lens.style.backgroundPosition = `${SIZE / 2 - fx * bw}px ${SIZE / 2 - fy * bh}px`;
+    const top = last.y - SIZE / 2;
     lens.style.width = lens.style.height = SIZE + 'px';
     lens.style.left = (last.x - SIZE / 2) + 'px';
-    lens.style.top = (last.y - SIZE / 2) + 'px';
+    lens.style.top = top + 'px';
+    const b = badge();
+    if (b) {
+      b.textContent = LEVELS[level] + '×';
+      // Above the circle, unless the circle is near the top of the window and the label would be
+      // clipped — then below it instead. 24px is the label's own height plus its gap; measuring it
+      // would be a layout read on every mousemove for a box whose size never changes.
+      b.classList.toggle('below', top < 24);
+    }
     lens.classList.add('on');
   }
 
@@ -4542,15 +4563,23 @@ const Loupe = (() => {
     // Every way OFF resets the zoom, not just the icon. Escape and closing the detail used to leave
     // it behind, so the next glance opened at a magnification nobody had asked for — and with the
     // lens down there is nothing on screen saying which level it will come back at.
-    // Step the magnification. The wheel drives this in both modes; tapping `z` also does while
-    // PINNED, which is the only time a tap is available — held mode owns the key by definition.
+    // Step the magnification, clamped. The wheel drives this one; `z` walks its own cycle below.
     step(d) { level = Math.min(LEVELS.length - 1, Math.max(0, level + d)); sync(); },
-    // Tapping wraps rather than stopping at the top: a key with no visible effect reads as broken,
-    // and there is no other way back down from a keyboard-only tap.
-    cycle() { level = (level + 1) % LEVELS.length; sync(); },
+    // What `z` does (2026-09-15): ONE key walking off → 1× → 2× → 3× → 4× → off, so the lens can be
+    // switched on from the keyboard at all. It could not before — `z` was momentary and only the
+    // icon pinned it, which meant the review flow this exists for (set a magnification, then walk
+    // the results with ←/→) began with a mouse trip to the action bar.
+    // OFF IS A STATE OF THE CYCLE rather than a wrap back to 1×: a ring with no exit strands anyone
+    // who reached it from the keyboard, since the key that turned it on would then never turn it
+    // off. The wheel's `step` clamps instead, because a wheel has somewhere else to go.
+    tap() {
+      if (!pinned) { pinned = true; level = 0; }
+      else if (level >= LEVELS.length - 1) { pinned = false; level = 0; }
+      else level += 1;
+      sync();
+    },
     get level() { return LEVELS[level]; },
     get showing() { return active() && !!el() && el().classList.contains('on'); },
-    get pinned() { return pinned; },
     off() { pinned = held = false; level = 0; sync(); },
     move(x, y) { last = { x, y }; if (active()) draw(); },
     // After ←/→ swaps the picture, or a set pane re-renders, the lens is still up but showing the
@@ -7867,6 +7896,10 @@ $('#overlay .overlay-bg').addEventListener('click', closeDetail);
 // be two different buttons.
 $('#dPrev').addEventListener('click', () => stepDetail(-1));
 $('#dNext').addEventListener('click', () => stepDetail(1));
+// The two halves of one mode: #dMaxiBtn in the actions row goes in, #dMaxi in the corner comes out.
+// Both call the same toggle — each is only on screen in the mode where its own label is true, so
+// neither needs to know which way it is going.
+$('#dMaxiBtn').addEventListener('click', () => Maxi.toggle());
 $('#dMaxi').addEventListener('click', () => Maxi.toggle());
 // Filmstrip: click to jump. Delegated, because the strip is rebuilt wholesale on a new result set.
 $('#stripScroll').addEventListener('click', e => {
@@ -7959,8 +7992,8 @@ document.addEventListener('keydown', e => {
   const helpOpen = !$('#help').classList.contains('hidden');
   const detailOpen = !$('#overlay').classList.contains('hidden');
   // Whichever of the three standalone panels is up, as its closer. Resolved HERE with the other
-  // open-flags rather than inside the Escape branch, because two places below need the same answer:
-  // the loupe guard (a pinned lens must not eat the key a modal wanted) and the ladder itself.
+  // open-flags rather than inside the Escape branch, because more than one place below needs the
+  // same answer: the ladder itself, and the arrow-key guard further down.
   const panelClose = escPanel();
   // ONE expression for "is any layer open", read by every test below. It was TWO lists and they
   // disagreed: the grid-view guard did not know about the three panels, so with only the duplicates
@@ -7998,12 +8031,13 @@ document.addEventListener('keydown', e => {
   }
 
   if (e.key === 'Escape') {                       // Escape closes the topmost layer
-    // The pinned lens is a layer too: Escape drops it and keeps the image, rather than closing the
-    // detail out from under someone who only wanted the magnifier gone.
-    if (Loupe.pinned && !settingsOpen && !renameOpen && !setupOpen && !tagModalOpen && !helpOpen
-        && !panelClose) {
-      Loupe.off(); return;
-    }
+    // THE MAGNIFIER IS NOT A LAYER (reversed 2026-09-15; see docs/decisions.md). It used to take
+    // the first Escape, on the reasoning that dropping the lens beats closing the view out from
+    // under someone who only wanted the magnifier gone. That held while pinning meant a deliberate
+    // click on the icon. Now `z` pins it, so a lens is the ordinary state of the review flow — set a
+    // magnification, then walk the set with ←/→ — and a setting must not eat the key that leaves
+    // the view. From maximized it is two presses to the grid whether or not the lens is up.
+    // Nothing is stranded: `z` cycles round to off, the icon toggles, and closeDetail clears it.
     // Help FIRST: it opens from the Settings header and sits over it, so Escape has to take the
     // top layer off. Testing settingsOpen first would shut Settings out from under an open Help.
     if (helpOpen) closeHelp();
@@ -8021,10 +8055,10 @@ document.addEventListener('keydown', e => {
     // over it — the folder menu's "Delete copies…" is reachable with an image open — so they take
     // Escape before it: whatever is on top owns the key.
     else if (panelClose) panelClose();
-    // Maximized is a layer too, on the same terms as the pinned lens above: step back to the normal
-    // detail view rather than closing it out from under someone who only wanted the chrome back.
-    // So from maximized it is Esc for the detail view, Esc again for the grid — which is also the
-    // order the two corner buttons sit in, left then right.
+    // Maximized IS a layer: step back to the normal detail view rather than closing it out from
+    // under someone who only wanted the chrome back. So from maximized it is Esc for the detail
+    // view, Esc again for the grid — two presses to the grid from anywhere in here, which is the
+    // whole point of the magnifier no longer taking one of them.
     else if (Maxi.on) Maxi.off();
     else closeDetail();
     return;
@@ -8041,13 +8075,18 @@ document.addEventListener('keydown', e => {
       // modifier is held so e.g. Ctrl+A stays the browser's own action, not the 'a' label.
       const l = (e.ctrlKey || e.metaKey || e.altKey) ? null : labelByKey(e.key);
       if (l) { e.preventDefault(); labelDetail(l.slug); return; }
-      // Hold z to magnify. Not a toggle here — the icon is the toggle; this is the momentary one,
-      // so a glance costs a keypress and nothing is left switched on. `repeat` is ignored because
-      // holding a key autorepeats, and re-raising on every repeat would fight the pointer.
+      // z steps the magnifier: off → 1× → 2× → 3× → 4× → off. Shift+Z is the momentary peek that
+      // ends when you let go — the behaviour plain z used to have, moved aside on 2026-09-15 so the
+      // lens could be switched on without holding a key down while arrowing through a set.
+      //
+      // BRANCH ON e.shiftKey, NEVER ON THE LETTER'S CASE. `e.key` is 'Z' for Shift+z AND for a
+      // plain z under Caps Lock, so a case test hands anyone with Caps Lock on the exact opposite of
+      // both behaviours. The letter test stays case-insensitive; only the modifier decides which.
+      //
+      // `repeat` is ignored for both: autorepeat would re-cycle the zoom on a held key, and
+      // re-raising the peek on every repeat would fight the pointer.
       if (!(e.ctrlKey || e.metaKey || e.altKey) && (e.key === 'z' || e.key === 'Z')) {
-        // Pinned, a tap steps the zoom and wraps back to 1:1 — the lens is already up, so the key
-        // has nothing else to do. Unpinned it is the momentary hold.
-        if (!e.repeat) Loupe.pinned ? Loupe.cycle() : Loupe.hold(true);
+        if (!e.repeat) e.shiftKey ? Loupe.hold(true) : Loupe.tap();
         e.preventDefault(); return;
       }
       // f: maximize / restore. NOT Tab, which is Lightroom's key for this — Tab is how a keyboard

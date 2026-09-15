@@ -2970,6 +2970,13 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
                                mask: var(--icon-maximize) center / contain no-repeat; }
 .detail.chrome-off .maxi-toggle::before { -webkit-mask: var(--icon-minimize) center / contain no-repeat;
                                                   mask: var(--icon-minimize) center / contain no-repeat; }
+/* THE CORNER BUTTON IS THE EXIT ONLY (2026-09-15). The way in moved to #dMaxiBtn in the actions
+   row, beside the magnifier, because maximizing acts on the card you are looking at. This one is
+   the other half of that pair and appears only in the mode it leaves — so it is never two buttons
+   for one thing on screen at once. `display`, not `visibility`: the pair is absolutely positioned,
+   so removing one does not move the ✕, and a hidden-but-hit-testable control in this corner is a
+   bug this app has shipped before. */
+.detail:not(.chrome-off) .maxi-toggle { display: none; }
 
 /* The only thing left on screen besides the picture: which file this is, and where you are in the
    set. It OVERLAYS the image rather than taking a band of its own — a layout row would give back
@@ -3251,6 +3258,29 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
   display: none;
 }
 .loupe.on { display: block; }
+
+/* WHICH STEP THE LENS IS ON. `z` cycles four of them and the wheel steps them, and without this the
+   only way to know where you are is to recognise the magnification by eye — which is precisely the
+   thing being judged, so it cannot also be the readout.
+   A CHILD OF THE LENS, not a sibling: the lens is already positioned every mousemove, so anything
+   anchored to it is placed for free and can never lag the circle by a frame.
+   The number is the STEP, and the steps are exact multiples of each other — L2 is always double L1.
+   It is not a claim about the file's own pixels: there is a floor of 2x the drawn size, so on an
+   image displayed at more than half its natural size, L1 is more than 1:1. Showing the true figure
+   instead would print a different number per image at the SAME step, which would break the
+   blink-compare across a set that the lens exists for. */
+.loupe-lvl {
+  position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%);
+  margin-bottom: var(--space-1);
+  padding: 1px var(--space-1); border-radius: var(--radius-pill);
+  background: var(--bg2); border: 1px solid var(--border-control);
+  color: var(--fg); font-size: var(--text-xs); line-height: 1.5; font-variant-numeric: tabular-nums;
+  white-space: nowrap; pointer-events: none;
+}
+/* Near the top of the window there is no room above the circle, so it swaps to the inside of the
+   bottom edge rather than being clipped off-screen. Set by draw(), which is the only code that
+   knows where the lens landed. */
+.loupe-lvl.below { bottom: auto; top: 100%; margin-bottom: 0; margin-top: var(--space-1); }
 
 /* image-set keep-one cull view: members side by side + an action bar. Fills the media pane. */
 .set-view { display: flex; flex-direction: column; width: 100%; height: 100%; gap:var(--space-2); padding:var(--space-3); }

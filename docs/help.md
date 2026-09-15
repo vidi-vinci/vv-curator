@@ -114,9 +114,10 @@ prompt, and still will not appear under its model, until the library is rescanne
 |---|---|
 | `←` `→` | Previous / next — or, in focus view on a set, that set's own members |
 | `Shift`+`←` `→` | Previous / next card, whatever else the arrows are doing |
-| `F` | Focus view: the picture takes the whole window. `F` again or `Esc` to come back |
+| `F` | Focus view: the picture takes the whole window. `F` again or `Esc` to come back, which also switches the magnifier off |
 | `K` | In focus view on a set: keep the one on screen, recycle the rest |
-| `z` | Hold to magnify. Tap to step the zoom while it is pinned |
+| `z` | Magnify. Tap again to step the zoom, once more to switch it off. The step shows above the lens |
+| `Shift`+`z` | Magnify only while held |
 | `Space` | Play or pause a video |
 | `1`–`9` | Mark the keeper in an image set. In focus view, show that member instead |
 | `a`–`e` | Apply a curation label |
