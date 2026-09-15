@@ -6099,7 +6099,30 @@ function offlineAlert() {
   return uiAlert('One or more libraries are offline. They\'ll be disabled until they\'re back online.',
                  'Libraries offline');
 }
-async function checkChanges() {
+// ONE CHECK AT A TIME, SHARED BY EVERY CALLER. Returning to the window wakes two of them at once --
+// probeChanges(), which keeps the strip's ↻ honest whether or not the clock is on, and the refresh
+// tick itself -- and each asked independently. On five libraries across network shares a trace
+// showed that as two overlapping /api/changes on EVERY return, about a second each, the second
+// reporting a much smaller server time because it was queued behind the first.
+//
+// SINGLE-FLIGHT SITS HERE, NOT ON fetchChanges, because this function is not only a fetch: it
+// repaints the library list, may raise a toast about a share going or coming back, and on a flip
+// re-runs the whole search. Sharing just the network call would still have done all of that twice,
+// including a second full search -- the expensive half.
+//
+// FIXED HERE RATHER THAN BY TEACHING THE CALLERS ABOUT EACH OTHER. Both fire for good reasons and
+// neither is wrong to ask; what is wrong is asking again while the answer is already on its way. A
+// future caller gets this for free without knowing the rule exists.
+//
+// Cleared in a finally, so one failed check cannot wedge every later one.
+let _changesInFlight = null;
+function checkChanges() {
+  if (!_changesInFlight) {
+    _changesInFlight = _checkChanges().finally(() => { _changesInFlight = null; });
+  }
+  return _changesInFlight;
+}
+async function _checkChanges() {
   const { flipped, went, came } = await fetchChanges();
   renderLibList(window._facets && window._facets.roots);
   // A LIBRARY LEAVING INTERRUPTS; ONE ARRIVING DOES NOT. The author's call, 2026-09-14: losing a share

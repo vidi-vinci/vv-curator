@@ -115,12 +115,27 @@ check('the client reads reachability off the changes poll', 'exists' in fc, fc[:
 check('  and writes it back onto state.roots, which isRootOffline reads',
       'r.exists =' in fc or 'r.exists=' in fc, fc[:400])
 
-cc = js[js.index('async function checkChanges('):]
+# `_checkChanges` is the body; `checkChanges` is the single-flight wrapper in front of it, added
+# 2026-09-15 so that returning to the window asks the shares once rather than twice. The repaint
+# rules being checked here live in the body.
+cc = js[js.index('async function _checkChanges('):]
 cc = cc[:cc.index('\n}')]
 check('a reachability FLIP repaints the grid, not only the Libraries row',
       'flipped' in cc and 'search(' in cc, cc)
 check('  and an unchanged poll does NOT repaint it (this runs off every filter change)',
       'if (flipped)' in cc, cc)
+
+# ONE CHECK AT A TIME. Returning to the window wakes probeChanges() and the auto-refresh tick at the
+# same moment, and both ask the shares. A real trace on five libraries showed two overlapping
+# /api/changes on EVERY return, about a second each. The guard has to wrap checkChanges rather than
+# the fetch under it, because this function also repaints the list, may toast, and on a flip re-runs
+# the whole search -- sharing only the network call would still do the expensive half twice.
+wrapper = js[js.index('function checkChanges('):]
+wrapper = wrapper[:wrapper.index('\n}')]
+check('a second caller joins the check in flight rather than starting another',
+      '_changesInFlight' in wrapper, wrapper)
+check('  and the in-flight promise is cleared, so a failure cannot wedge later checks',
+      'finally' in wrapper and '_changesInFlight = null' in wrapper, wrapper)
 
 httpd.shutdown()
 shutil.rmtree(TMP, ignore_errors=True)

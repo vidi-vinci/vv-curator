@@ -824,14 +824,40 @@ def _first_lyric_line(lyrics):
     return None
 
 
+# CACHED, BECAUSE THE ANSWER DOES NOT DEPEND ON THE PAGE. The query below is a GROUP BY over the
+# whole images table, and it used to run on every page of results that happened to contain a single
+# song -- a full-table aggregate, per page, to compute a library-wide fact. A trace on 5,883 images
+# caught it costing 124ms on one scroll page (200ms against the usual 74) and 147ms of a 257ms
+# random-sort search. The cost grows with the library, and it spreads as songs do.
+#
+# INVALIDATED WHEN A SCAN ENDS, which is the only thing that can change song_name or song_genre.
+# Held for the process otherwise. A stale entry would mis-title a song card, not lose data.
+_generic_songs = None
+_generic_songs_lock = threading.Lock()
+
+
+def clear_song_name_cache():
+    """Called when a scan finishes — see _generic_song_names."""
+    global _generic_songs
+    with _generic_songs_lock:
+        _generic_songs = None
+
+
 def _generic_song_names(conn):
     """Names that are a batch prefix rather than a title — see the note above."""
+    global _generic_songs
+    with _generic_songs_lock:
+        if _generic_songs is not None:
+            return _generic_songs
     try:
-        return {r[0] for r in conn.execute(
+        got = {r[0] for r in conn.execute(
             "SELECT song_name FROM images WHERE song_name IS NOT NULL AND song_name <> '' "
             "GROUP BY song_name HAVING COUNT(DISTINCT song_genre) > 1")}
     except Exception:
-        return set()
+        return set()          # not cached: a failed read must not become the answer for the session
+    with _generic_songs_lock:
+        _generic_songs = got
+    return got
 
 
 def _song_headline(row, generic_names):
@@ -1646,6 +1672,9 @@ def _heal_stale_row(conn, row):
     if not root or not index_db.reread_one(conn, row, root['path'], THUMBS_DIR):
         return row
     conn.commit()
+    # The other writer of song_name/song_genre, so it drops the generic-names set the same way a
+    # scan does. Once per file per reader version, so this is not a per-open cost.
+    clear_song_name_cache()
     return conn.execute("SELECT * FROM images WHERE id=?", (row['id'],)).fetchone() or row
 
 
@@ -2476,6 +2505,11 @@ def run_scan(force=False, key=None):
         except Exception as e:
             _scan_state['error'] = str(e)
         finally:
+            # A scan is the only thing that writes song_name or song_genre, so it is the only thing
+            # that can invalidate the generic-names set. In the finally with the state update, so a
+            # scan that failed or was stopped part-way still drops it: it may have written rows
+            # before it stopped.
+            clear_song_name_cache()
             _scan_state.update(running=False, done=True, ended_at=time.time())
 
     threading.Thread(target=worker, daemon=True).start()
