@@ -4997,7 +4997,19 @@ const THEME_LIGHT = {
   // bar. #59616d holds 4.60 on all four. Nobody will see the difference in the colour; they would
   // have seen it in the failure.
   '--bg': '#eceef2', '--bg2': '#ffffff', '--bg3': '#e2e5eb', '--sidebar-bg': '#d9dde5',
-  '--fg': '#1b1e24', '--muted': '#59616d', '--border': '#d6dae1',
+  // --border DARKENED for WCAG 2.1 AA 1.4.11 (Non-text Contrast), which asks 3:1 of the boundary of
+  // anything you can operate. --border-control is mixed from this and --fg, and in the light preset
+  // it landed at 2.49:1 on the page and 2.12:1 in the rail -- a text field whose edge you could
+  // barely find. #a7afbf takes the derived edge to #767c89, 3.08:1 on the darkest of the four light
+  // surfaces.
+  // PER-THEME, WHICH IS THE WHOLE REASON THIS WAS CHEAP. The mix percentage is shared, so for weeks
+  // I had this recorded as a change that would lighten the DARK theme's edges too, and the author
+  // held the decision on that basis. It does not: --border is a THEME_LIGHT value, so the light edge moves
+  // alone and dark is untouched. The cost that is real is dividers and card frames going a little
+  // heavier in light, since they read --border directly -- his call, taken 2026-09-16 once he knew
+  // it was a quality choice and not an ADA obligation (it is not: ADA sets no contrast numbers, and
+  // a local tool is not a place of public accommodation).
+  '--fg': '#1b1e24', '--muted': '#59616d', '--border': '#a7afbf',
   // FOUR OF THESE WERE RAISED TO CLEAR WCAG on 2026-09-15, the first time the contrast audit was
   // acted on rather than just run. Each keeps its hue and loses a little lightness -- the same
   // colour a step deeper, not a new one -- and each is the value that clears its bar against EVERY

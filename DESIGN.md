@@ -24,15 +24,23 @@ close already exists, use it; if you add a component, add its row here in the sa
 | `--sidebar-bg` | `#0e0f12` | the left rail (darker than the panels) |
 | `--fg` | `#e6e8ec` | primary text |
 | `--muted` | `#9aa3af` | secondary text, labels |
-| `--border` | `#2c313a` | dividers and container outlines — deliberately quiet (1.15:1 on `--bg3`) |
+| `--border` | `#2c313a` dark · `#a7afbf` light | dividers and container outlines. Quiet in dark (1.15:1 on `--bg3`); the LIGHT value is darker because `--border-control` derives from it, and the derived edge had to clear 3:1 — see below |
 | `--border-control` | `color-mix(in srgb, var(--border), var(--fg) 35%)` | the edge of a **control** — button, input, select, textarea, `.icon-btn`, `.facet-trigger`, a quiet field once it is drawn |
 
 **A control's edge is not a divider.** One token was doing both, and a hairline drawn to disappear
 between two things is the wrong weight for the boundary of something you click: "Select all" read as
 borderless. Derived rather than duplicated, so the Appearance editor's **Border** still governs both,
 and mixed toward `--fg` rather than `#fff` so the one number lightens the edge on the dark ground and
-darkens it on the light one — 3.05:1 dark, 2.49:1 light, against 1.15/1.21 before. Dividers,
-container outlines and the card's own frame keep `--border` and stay quiet.
+darkens it on the light one. Dividers, container outlines and the card's own frame keep `--border`
+and stay quiet.
+
+**Both themes clear WCAG 2.1 AA 1.4.11 (Non-text Contrast) as of 2026-09-16** — 3.41:1 dark, 3.08:1
+light at worst. The light edge sat at 2.12–2.89 until then, and the fix was to darken `--border` in
+the light preset rather than change the shared mix: **`--border` is a per-theme value, so the light
+edge moves alone.** That was recorded here as a change that would drag dark's edges with it, which
+was wrong and held the decision up for a day. The real cost is the one paid: dividers and card
+frames are a little heavier in light, since they read `--border` directly. `audit_contrast.py`
+reports every pair clearing its bar.
 
 ### Accents & state
 | Token | Value | Use |
