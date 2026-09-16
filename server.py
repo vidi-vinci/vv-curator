@@ -1085,7 +1085,7 @@ APP_NAME = 'VV Curator'
 # welcome after an update, and it is what a version check would compare against. READER_VERSION in
 # index_db.py is a different number for a different job: what the app can extract from a file. They
 # move independently, and a release that reads nothing new does not touch it.
-APP_VERSION = '1.0'
+APP_VERSION = '1.1'
 
 # ---- telling people a newer version exists ----------------------------------------------------
 # WHERE A RELEASE IS ANNOUNCED: owner/name of the GitHub repo. This is the whole reason the project

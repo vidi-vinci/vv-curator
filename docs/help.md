@@ -206,11 +206,13 @@ details panel and the notes strip so the picture takes the whole window — and 
 flip between that set's own members rather than moving through your results. Two images in the same
 place, swapped, is a better test of which is sharper than two side by side; it also means the
 magnifier stays on the same spot when you flip. `Shift`+`←` `→` is how you leave for the next card,
-and the line under the picture says so while you are in there.
+and the header along the top says so while you are in there, with each key drawn beside what it
+does. No quality score appears in focus view: it is the one place built for judging by eye.
 
 **After `K`, the arrows go quiet — if your Keep behaviour is "Stay on card".** You asked to stay on
 what you kept, so a stray arrow does not carry you off it. `Shift`+`←` `→` moves on and releases it,
-as does leaving focus view. With "Next card" you have already been moved on, and nothing is held.
+as does leaving focus view — and so does undoing the keep, which puts the set back and hands the
+arrows with it. With "Next card" you have already been moved on, and nothing is held.
 
 **Recycling a card takes the whole run, including a file queued for recycle already.** A video's
 `.txt` goes too, but only once every file of that run has gone: one text file can describe a whole
