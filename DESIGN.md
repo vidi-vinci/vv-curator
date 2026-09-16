@@ -106,7 +106,7 @@ detail view's `--img-bg` letterbox, which is absolute. Reaching for `--scrim` on
 separation exists to stop: the furniture was authored dark-on-anything, which recedes on a dark UI
 and turns into high-contrast blocks on a light one.
 
-**One ground, three surfaces.** The grid, the filmstrip and the detail view all letterbox against `--bg`, so moving between them never changes what sits behind a picture. `--img-bg` is now an alias of `--bg` rather than an absolute near-black: it made the detail pane a dark slab inside a light UI, and even in the dark theme it was a *second*, darker black, so the picture sat in a visible rectangle of its own. The detail view's own chrome — nav, close, the maximised caption — takes the same treatment as the card's, because it sits on the same picture.
+**A letterbox belongs to the thing holding the picture, not to the page behind it.** A card letterboxes against `--bg2` (what `.card` is filled with), a filmstrip item against `--bg3` (what it is filled with), the detail view against `--bg`. Pinned to `--bg` everywhere, the bars matched the page exactly, so wherever a picture did not fill its square the card's own extent dissolved into the background and only a 1.3:1 hairline said where it ended — which is what read as a flat, uniform grid. The rule is the same in both themes; it is the *value* that differs per surface. `--img-bg` is now an alias of `--bg` rather than an absolute near-black: it made the detail pane a dark slab inside a light UI, and even in the dark theme it was a *second*, darker black, so the picture sat in a visible rectangle of its own. The detail view's own chrome — nav, close, the maximised caption — takes the same treatment as the card's, because it sits on the same picture.
 
 The grid's letterbox is `--bg`: `object-fit: contain` means anything that is not square
 shows bars, and the badges sit in the corners — which for most pictures *is* bar, not picture. It
@@ -282,6 +282,7 @@ Use these. Do not invent another for the same job.
 | `.set-test.warn` | the third state of a self-test: amber, on `--modified` | **a check with three honest outcomes must not be squeezed into two**, or the mark contradicts the sentence beside it — here a green tick beside "pictures may NOT work" |
 | `.hint` | a quiet line of explanation beside something — `--muted` at `--text-sm` | colour and size only; layout belongs to the caller. `.set-hint` and `.setup-hint` predate it and are the same two declarations plus their own flex/margin — fold them in when either is next touched, not as a pass of its own |
 | `.panel` | inset bordered container on `--bg3` | `.popmenu` shares the recipe; the first-run `.empty-hint` composes with it rather than drawing its own box |
+| `.keycap` | a single key, drawn as a key: a bordered box carrying its letter, or the `--chevron` mask turned a quarter for `←` / `→` (`.k-left` / `.k-right`) | **the box is the point.** The focus view spelled its keys as the characters `← → ⇧` at 11px and they read as nearly nothing — the author: *"the little arrows are almost invisible - can we use real icons?"* A bordered box says "press this" whatever the glyph inside weighs. Sized from `--glyph-sm`, coloured from the `--card-*` pair, so it works on any picture in either theme |
 | `.inline-ico` | a control's own glyph quoted inside a sentence — "click the ⧉ icon" | the SVG is LIFTED from the live element at render time, never copied into the string; `vertical-align` keeps it out of the line box so the paragraph's leading doesn't jump |
 | `.lib-stat.nudge` | first-run state on the Libraries button: `--active` fill, `--on-accent` mark, fill-pulse | a filled state must override `button.lib-stat:hover`, which otherwise repaints it grey — this one rings, auto-refresh lightens |
 | `.popmenu` | menu surface; `.popmenu button` styles items | descendant selector — a non-item child inherits it |
@@ -346,6 +347,11 @@ The app has one user, who knows what it is for. Copy labels and disambiguates; i
   and adds after a dash: `Magnify (Z) — hold to peek · click to keep on · scroll to zoom`.
   *(Three were out of step before this was written down: two lowercase letters and one hint naming
   two keys. A shape that lives only in the existing examples drifts every time someone adds one.)*
+- **A key LEGEND is the other way round: the key first, drawn as a `.keycap`, then what it does.**
+  `[K] Keep this one`. `Action (Key)` is for a control's own label or tooltip, where the action is
+  the thing being named and the key is an aside; a legend is a list of keys, so the key is the
+  column you scan. The focus-view header is the only legend in the app — if a second appears, it
+  takes this shape rather than inventing a third.
 
 ---
 

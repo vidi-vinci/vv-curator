@@ -205,6 +205,20 @@ why every rule below names whether it means files or cards.
   there — silently. Emptying that folder is a file-manager job, deliberately not the app's.
 - **Hidden is "not this one, for now"** — a curation mark, not a filter, and absent from the
   snapshot/reset machinery on purpose.
+- **"Apply to folder" is deliberately unreachable from the full-screen view, and `K` can never
+  trigger it.** Raised a second time on 2026-09-15 — *"one thing we do NOT have in full-screen view
+  is 'apply to all in folder' as we do in detail view. worth adding?"* — so it is written down here.
+  It is enforced twice: marking a keeper unticks the box, and `K` marks a keeper before it recycles,
+  so a stale tick cannot survive into that keystroke. **The reason is the count.** Ticking the box
+  shows a preview of what the folder cull would take — how many sets, how many files — and that
+  preview lives in the set bar, which the full-screen view hides. Offering the capability there
+  would mean agreeing to a number you cannot see, which is worse than the existing flow rather than
+  quicker. Three supporting reasons, none sufficient alone: a scope switch is safe because it sits
+  *beside* the thing you press, and a key has no adjacent checkbox; `K` was chosen over Enter to be
+  explicit, and folder scope turns one keystroke into a multi-set recycle inferred from a single
+  example; and the mode is for judging one picture by eye — the Quality score was removed from it
+  the same day for that reason — where a folder-wide cull is a judgement about the shape of a
+  folder, which is what the panes view is for.
 
 ---
 

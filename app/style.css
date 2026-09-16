@@ -2084,8 +2084,13 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
    near-white bar it lands 5.62:1 against its ground with the glyph at 6.02:1 on top.
    The measurement that settles it: against the near-BLACK letterbox the same badge separated from
    its ground at 1.05:1. Pinning the bars dark was making the marks harder to pick out, not easier.
-   The star is the one mark with no scrim, and --star-edge is what carries it on a pale bar. */
-.card img { width: 100%; height: 100%; object-fit: contain; display: block; background: var(--bg); }
+   The star is the one mark with no scrim, and --star-edge is what carries it on a pale bar.
+   AND IT IS THE CARD'S GROUND, NOT THE PAGE'S -- --bg2, which is what .card is filled with. Pinned
+   to --bg it matched the page exactly, so wherever a picture did not fill the square the card's own
+   extent vanished into the background and only a 1.3:1 hairline said where it ended. The author:
+   "i think a light gray background on the cards in light mode would help. it's a bit too uniform."
+   It was not the card that needed the grey; the card was already white. The bars were the page. */
+.card img { width: 100%; height: 100%; object-fit: contain; display: block; background: var(--bg2); }
 
 /* ---- Song face: a drawn card, standing in for the thumbnail audio doesn't have ----------------
    Occupies the same box as `.card img` and carries the same badges on top of it. The genre tint is
@@ -2992,11 +2997,14 @@ button.danger:hover:not(:disabled):not([aria-disabled="true"]) { background: var
    declared --cap-line each, the gap and padding are the same tokens the bar itself uses.
    TWO HEIGHTS, because the hint line comes and goes with whether this is a set. The hint rule wins
    on specificity, not on order — :has() takes the specificity of its most specific argument. */
-.detail-img { --cap-line: 1rem; --cap-gap: 1px; --cap-clear: 0px; }
-.detail-img:has(.maxi-cap:not(.hidden)) {
-  --cap-clear: calc(var(--space-1) * 2 + var(--cap-line)); }
-.detail-img:has(.maxi-cap:not(.hidden) .cap-hint) {
-  --cap-clear: calc(var(--space-1) * 2 + var(--cap-line) * 2 + var(--cap-gap)); }
+/* --cap-clear IS ZERO NOW AND THE TWO :has() RULES ARE GONE. They lifted the Undo pill over the
+   caption bar back when that bar hung at the FOOT of the picture, and its height depended on
+   whether a hint row was showing -- which is why the clearance had to be arithmetic over the bar's
+   own tokens rather than a number. The bar is a header at the top since 2026-09-15, so the pill
+   sits where every other pill in the app sits. Kept as a declared 0 rather than deleted: the rule
+   below still reads it, and a token that vanishes from under a calc() is a harder thing to follow
+   than one that says it contributes nothing. */
+.detail-img { --cap-line: 1rem; --cap-gap: var(--space-1); --cap-clear: 0px; }
 .detail-img > .status {
   position: absolute; bottom:calc(var(--space-4) + var(--cap-clear)); left:var(--space-4); right:auto;
   /* max-width only, never width — the base rule's `max-content` and .has-progress's fixed 520px
@@ -3136,10 +3144,23 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
    set. It OVERLAYS the image rather than taking a band of its own — a layout row would give back
    some of the height the mode just reclaimed, and `object-fit: contain` usually leaves letterbox
    here anyway. Same reason .nav lives inside .detail-img. */
-.maxi-cap { position: absolute; left:0; right:0; bottom:0; z-index: 3;
+/* A HEADER, AND IT MOVED TO THE TOP on 2026-09-15. It was two 11px rows at the FOOT of the picture
+   carrying three jobs at once -- what you are looking at, what the arrows do, and that K exists --
+   and the author read it as what it was: "this text in the F view is tee-tiny. and dense." His
+   direction was to go the other way: "Maybe we should amplify rather than reduce here. Create a
+   'Full-screen' mode header for the F view - and more clearly show the options?"
+   TOP, not bottom, for two reasons. The two close buttons already live up there, so the bar's right
+   end simply contains them instead of a second cluster elsewhere -- and moving it off the foot
+   deletes --cap-clear, the arithmetic the Undo pill needed to sit above a bar whose height depended
+   on whether a hint was showing.
+   PADDED CLEAR OF THOSE BUTTONS rather than laid under them: both are .close at --space-3 from the
+   right, the second offset by its own width again, so the reserve is that expression doubled. They
+   are siblings of .detail-media and float over everything, so nothing here can push them. */
+.maxi-cap { position: absolute; left:0; right:0; top:0; z-index: 2;
   display: flex; flex-direction: column; gap: var(--cap-gap);
-  padding: var(--space-1) var(--space-3);
-  background: var(--card-scrim-strong); color: var(--card-ink); font-size: var(--text-xs); }
+  padding: var(--space-2) var(--space-3);
+  padding-right: calc(var(--space-3) + 2 * (var(--glyph-sm) + var(--space-2) * 2) + var(--space-2));
+  background: var(--card-scrim-strong); color: var(--card-ink); font-size: var(--text-sm); }
 .maxi-cap.hidden { display: none; }
 /* The facts. A ROW INSIDE THE COLUMN rather than the bar itself being the row, because the K hint
    below it is a second line — the bar was a single flex row until the hint arrived. */
@@ -3163,6 +3184,37 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
 .maxi-cap .cap-hint { color: color-mix(in srgb, var(--card-ink), var(--card-scrim-strong) 35%);
   height: var(--cap-line); line-height: var(--cap-line);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* THE ACTION ROW. One line saying what this mode can do, and it only exists where there IS a set to
+   step through -- a single image collapses to the identity row alone (the author's pick). It wraps
+   rather than ellipsising, unlike .cap-hint above: that rule was written when the bar hung over the
+   foot of the picture and a second line would have grown UP into the image. From the top a second
+   line grows down, which costs the same pixels as any other header and loses no meaning. */
+.maxi-cap .cap-acts { display: flex; align-items: center; gap: var(--space-4);
+  flex-wrap: wrap; row-gap: var(--space-1); }
+.maxi-cap .cap-act { display: flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
+.maxi-cap .cap-act .lab { color: color-mix(in srgb, var(--card-ink), var(--card-scrim-strong) 30%); }
+/* ---- .keycap: a key drawn as a key ------------------------------------------------------------
+   The hint used the CHARACTERS ← → ⇧ at 11px, and the author's report is the same fault the detail
+   chevrons had earlier the same day: "the little arrows are almost invisible - can we use real
+   icons?" A text arrow is whatever weight its font gives it, which at this size is nearly nothing.
+   A bordered box fixes that independently of the glyph: the box says "this is a key you press" even
+   where the mark inside it is light, and the mark itself is now the same --chevron mask the selects
+   and the nav buttons draw, turned a quarter -- so the key you press and the button you click carry
+   one shape. Sized from --glyph-sm so it tracks the app's mark scale rather than a number. */
+.keycap { display: inline-flex; align-items: center; justify-content: center;
+  min-width: calc(var(--glyph-sm) + var(--space-1)); height: calc(var(--glyph-sm) + var(--space-1));
+  padding: 0 var(--space-1); border-radius: var(--radius-xs);
+  border: 1px solid var(--card-edge); background: var(--card-scrim-soft);
+  font-size: var(--text-xs); font-weight: 600; line-height: 1; color: var(--card-ink); }
+.keycap::before { content: ''; display: none; width: var(--text-xs); height: var(--text-xs);
+  background: currentColor;
+  -webkit-mask: var(--chevron) center / contain no-repeat;
+          mask: var(--chevron) center / contain no-repeat; }
+/* The two arrow keys, drawn rather than typed. --chevron points DOWN; a quarter turn each way gives
+   the pair, exactly as .nav.prev / .nav.next do it. */
+.keycap.k-left::before, .keycap.k-right::before { display: block; }
+.keycap.k-left::before  { transform: rotate(90deg); }
+.keycap.k-right::before { transform: rotate(-90deg); }
 /* --cap-fg and --on-accent, NOT --muted and --fg. The bar's ground is --scrim-strong, which is 78%
    black in BOTH themes, while --fg and --muted invert with the theme — so the first cut was
    #1b1e24 on near-black under the light preset, i.e. an invisible caption for anyone not using the
@@ -3243,10 +3295,11 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
   position: relative; padding:0; border: none; background: var(--bg3);
   border-radius: var(--radius-sm); overflow: hidden; cursor: pointer;
 }
-/* Same ground as the grid card, for the reason given there: the filmstrip shows the same items and
-   carries the same marks, so a letterbox that differed between the two views would give one mark
-   two appearances. */
-.strip-item img { width: 100%; height: 100%; object-fit: contain; display: block; background: var(--bg); }
+/* THE ITEM'S OWN GROUND, which is the rule the card states: a letterbox belongs to the thing
+   holding the picture, not to the page behind it. A strip item is filled with --bg3, so its bars
+   are --bg3 -- the same rule as the card, applied to a different surface, rather than the same
+   VALUE copied across. */
+.strip-item img { width: 100%; height: 100%; object-fit: contain; display: block; background: var(--bg3); }
 .strip-item:hover { outline: 1px solid var(--border); outline-offset: -1px; }
 /* CURRENT is an inset outline, never a border or a margin: the strip auto-scrolls to keep this item
    in view, and anything that changes an item's box would shift every neighbour each time you press

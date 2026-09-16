@@ -59,6 +59,24 @@ elif 'showing' not in guard.group(1):
     fail.append('the reopen guard ignores what is on screen (%s) -- with Keep behaviour "next" it '
                 'would yank the view back to the set you just undid' % guard.group(1).strip())
 
+# AND THE ARROW HOLD. Keeping from the focus view parks the arrows on purpose -- a reflexive
+# left/right must not carry you off a picture you have just decided about -- and the caption says so.
+# Undo never released it, so the set came back and the arrows stayed dead on top of it, under a
+# caption still claiming a keep that no longer existed: "it stays on the Kept card, but you can't
+# scroll after... it is confusing." Reopening the set was not enough on its own, and the first fix
+# for this bug shipped without it because the maximized path was never driven -- the ordinary detail
+# view was, and it has no hold.
+if 'releaseKeepHold' not in body:
+    fail.append('the restore closure does not release the keep hold -- the set comes back but the '
+                'arrows stay parked on the image you kept')
+else:
+    # It has to come BEFORE the reopen, or openDetail rebuilds the caption with the stale hint.
+    # The CALL, not the word: 'openDetail' also appears in the comment explaining this ordering,
+    # which is what this check tripped over on its first run.
+    if body.index('releaseKeepHold()') > body.index('openDetail(oldItem.id)'):
+        fail.append('releaseKeepHold runs after openDetail -- the caption is rebuilt while the hold '
+                    'is still set, so it keeps saying "Kept"')
+
 # And the ordering the reopen depends on: the server restore must be awaited before the closure runs.
 run = re.search(r'async run\(\) \{(.*?)\n    \},', JS, re.S)
 if not run:

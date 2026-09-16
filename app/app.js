@@ -4230,10 +4230,17 @@ const Maxi = (() => {
   // A "set" here means one worth flipping through. A single-member set is a single image.
   const members = () => (Array.isArray(state.setMembers) && state.setMembers.length > 1) ? state.setMembers : null;
 
-  // Ungated, exactly as the set panes render theirs (renderSetView): this caption is what stands in
-  // for those panes while maximized, so it must not know less than the thing it replaced.
-  const badge = r => r == null ? '' :
-    `<span class="reward" title="pyiqa quality score (1-10) — raw ${r.toFixed(3)}">${metricTo10(r).toFixed(1)}</span>`;
+  // NO QUALITY SCORE IN THIS MODE, and that is the point of the mode. The header used to carry the
+  // badge for parity with the set panes it replaces -- but .detail.chrome-off already hides the
+  // panes' own rewards, so the header was the last score standing in a view built for judging with
+  // your eyes. The author, 2026-09-15: "take scoring out. no need for it here. the entire point is-
+  // this is by eye." A number beside the picture is an answer offered before you have looked.
+  // One keycap. The two arrows are DRAWN (see .keycap in style.css); everything else is its letter.
+  const key = k => k === '<' ? '<span class="keycap k-left"></span>'
+                 : k === '>' ? '<span class="keycap k-right"></span>'
+                 : `<span class="keycap">${esc(k)}</span>`;
+  const act = (keys, label) => `<span class="cap-act">${keys.map(key).join('')}` +
+                               `<span class="lab">${esc(label)}</span></span>`;
 
   // The only thing left on screen besides the picture, and the reason the mode is usable at all:
   // The author's ask was that he can still tell which file he is looking at without the metadata panel.
@@ -4248,48 +4255,56 @@ const Maxi = (() => {
     let lead, facts, right;
     if (ms) {
       const m = ms[idx];
-      // Same order the panes use, and for the same reason: the stage reads first, the filename last
-      // because members of a set differ only by the stage already shown in bold.
+      // THE STAGE LEADS AND THE FILENAME IS REFERENCE. Within a set every member's name is the same
+      // string but for the stage token, so the name repeats what the bold word already said. The
+      // author: "the STAGE is most important, e.g. Raw, Detail, etc. filename should match, so not
+      // as important, yes?" It stays on the line -- it is still how you know WHICH run you are in --
+      // but behind the dimensions rather than in front of them.
       lead  = m.role ? m.role.toUpperCase() : ('#' + (idx + 1));
       facts = [(m.width && m.height) ? `${m.width}×${m.height}` : null,
-               m.size != null ? fmtBytes(m.size) : null, m.filename].filter(Boolean).join(' · ');
-      right = badge(m.reward) + `<span>${idx + 1} of ${ms.length}</span>`;
+               m.filename].filter(Boolean).join(' · ');
+      right = `<span>${idx + 1} of ${ms.length}</span>`;
     } else {
+      // A SINGLE IMAGE HAS NO STAGE, NO COUNTER AND NOTHING TO KEEP, so it collapses to the least
+      // that still says what you are looking at -- the author's pick, put to him as three options.
       const d = state.current || {};
       lead  = d.filename || '';
-      facts = [(d.width && d.height) ? `${d.width}×${d.height}` : null,
-               d.size != null ? fmtBytes(d.size) : null].filter(Boolean).join(' · ');
-      right = badge(d.quality ? d.quality.reward : null);
+      facts = (d.width && d.height) ? `${d.width}×${d.height}` : '';
+      right = '';
     }
-    // THE HINT IS THE WHOLE REASON K IS DISCOVERABLE. There is no other chrome in this mode, so a
-    // key nobody is told about is a key nobody uses — the author asked for it in the same breath as the
-    // key itself. Only where there is something to cull: a single image has no "others".
+    // THE ACTION ROW IS THE WHOLE REASON K IS DISCOVERABLE. There is no other chrome in this mode,
+    // so a key nobody is told about is a key nobody uses -- the author asked for the hint in the same
+    // breath as the key itself. Only where there IS a set: a single image has no others to recycle
+    // and its arrows behave the way they do everywhere else, so it gets the identity row alone.
     const others = ms ? ms.length - 1 : 0;
+    const idRow =
+      `<span class="cap-row"><b>${esc(lead)}</b>` +
+        (facts ? `<span class="cap-facts">· ${esc(facts)}</span>` : '') +
+        (right ? `<span class="cap-right">${right}</span>` : '') +
+      `</span>`;
     // HELD (see _keepHold): the arrows have just gone quiet and this is the only surface that can
-    // say so. Exactly the fault we fixed for the set case — a key that silently changes what it
-    // does, with nothing on screen to explain it — so the hold gets the same treatment.
+    // say so. Exactly the fault we fixed for the set case -- a key that silently changes what it
+    // does, with nothing on screen to explain it -- so the hold gets the same treatment, in the same
+    // shape as the row it replaces rather than as a sentence.
     if (_keepHold) {
-      cap.innerHTML =
-        `<span class="cap-row"><b>${esc(lead)}</b>` +
-          (facts ? `<span class="cap-facts">· ${esc(facts)}</span>` : '') +
-          `<span class="cap-right">${right}</span></span>` +
-        `<span class="cap-hint">Kept · Shift + ← → for the next card</span>`;
+      cap.innerHTML = idRow +
+        `<span class="cap-acts"><span class="cap-act"><span class="lab">Kept.</span></span>` +
+        act(['Shift', '<', '>'], 'Next card') + `</span>`;
       cap.classList.remove('hidden');
       return;
     }
-    // ALL THREE FACTS, because the arrows silently change hands in this view and nothing said so.
-    // The author found it the hard way: cull a set, arrow onward, land on another set, and the arrows
-    // start flipping ITS members — wrapping forever, so the filmstrip appears to stop dead. The
+    // ALL THREE, because the arrows silently change hands in this view and nothing said so. The
+    // author found it the hard way: cull a set, arrow onward, land on another set, and the arrows
+    // start flipping ITS members -- wrapping forever, so the filmstrip appears to stop dead. The
     // gesture that gets you out is the one thing the view could not tell you about.
-    const hint = others
-      ? `← → step this set · Shift + ← → next card · ` +
-        `K keeps this one and recycles the other${others === 1 ? '' : ' ' + others}`
+    const acts = others
+      ? `<span class="cap-acts">` +
+          act(['<', '>'], 'Step this set') +
+          act(['Shift', '<', '>'], 'Next card') +
+          act(['K'], `Keep this one, recycle the other${others === 1 ? '' : ' ' + others}`) +
+        `</span>`
       : '';
-    cap.innerHTML =
-      `<span class="cap-row"><b>${esc(lead)}</b>` +
-        (facts ? `<span class="cap-facts">· ${esc(facts)}</span>` : '') +
-        `<span class="cap-right">${right}</span></span>` +
-      (hint ? `<span class="cap-hint">${hint}</span>` : '');
+    cap.innerHTML = idRow + acts;
     cap.classList.remove('hidden');
   }
 
@@ -4465,6 +4480,16 @@ async function recycleSetOthers() {
       // ONLY IF YOU ARE STILL LOOKING AT IT. With the Keep behavior set to "next" the view has
       // already moved on to another card, and yanking it back to the set you just undid would be a
       // second surprise on top of the first.
+      // AND THE ARROW HOLD GOES WITH IT. Keeping from the focus view parks the arrows on purpose --
+      // you have just decided something about this picture, so a reflexive left/right must not carry
+      // you off it, and the caption says "Kept · Shift + arrows for the next card". Undo never
+      // released that, so the set came back and the arrows stayed dead on top of it, under a caption
+      // still claiming a keep that no longer exists. The author: "it stays on the Kept card, but you
+      // can't scroll after... it is confusing."
+      // Unconditional: the hold only exists because of the keep being undone here, and with the Keep
+      // behaviour on "next" it was never set in the first place.
+      // BEFORE the reopen, so the caption openDetail rebuilds is the honest one.
+      releaseKeepHold();
       const showing = state.current ? String(state.current.id) : null;
       const wasThisSet = showing && (showing === String(kept.id) || drop.map(String).includes(showing));
       if (wasThisSet && !$('#overlay').classList.contains('hidden')) openDetail(oldItem.id);
@@ -4962,8 +4987,17 @@ const THEME_GROUPS = [
 ];
 const THEME_TOKENS = THEME_GROUPS.flatMap(([, toks]) => toks);   // flat list for apply/save
 const THEME_LIGHT = {
-  '--bg': '#f6f7f9', '--bg2': '#ffffff', '--bg3': '#eceef2', '--sidebar-bg': '#e6e9ee',
-  '--fg': '#1b1e24', '--muted': '#5b6470', '--border': '#d6dae1',
+  // THE GROUND STEPPED DOWN so a white card reads as a card. It was #f6f7f9 against a #ffffff
+  // card -- a 1.07 separation, which is why the grid looked "a bit too uniform": nothing but a
+  // 1.3:1 hairline said where one card ended and the page began. The whole ramp moved with it,
+  // because --bg3 was already #eceef2 and the page landing on it would have dissolved every input
+  // into the page. Order preserved, sidebar darkest through to the white panels.
+  // --muted moved two points with the ground. Darkening the surfaces costs muted text contrast,
+  // and on the sidebar -- the darkest of the four -- it would have fallen to 4.40 against the 4.5
+  // bar. #59616d holds 4.60 on all four. Nobody will see the difference in the colour; they would
+  // have seen it in the failure.
+  '--bg': '#eceef2', '--bg2': '#ffffff', '--bg3': '#e2e5eb', '--sidebar-bg': '#d9dde5',
+  '--fg': '#1b1e24', '--muted': '#59616d', '--border': '#d6dae1',
   // FOUR OF THESE WERE RAISED TO CLEAR WCAG on 2026-09-15, the first time the contrast audit was
   // acted on rather than just run. Each keeps its hue and loses a little lightness -- the same
   // colour a step deeper, not a new one -- and each is the value that clears its bar against EVERY
@@ -4980,7 +5014,12 @@ const THEME_LIGHT = {
   // added earlier today is what makes leaving it alone possible: the gold stays #ffca3a everywhere
   // and --star-edge carries the 3:1 on whatever themed surface it lands on. One value, both jobs,
   // instead of a token that was quietly serving two.
-  '--accent': '#2061d3', '--active': '#2c9649', '--danger': '#c42b2b',
+  // --active went one more step down WITH the rail. It was tuned to 3.10 against the old
+  // #e6e9ee sidebar, and stepping the ground down took it to 2.77 -- re-breaking, the same day,
+  // the exact pair that morning's contrast pass had fixed. #2a8e45 holds 3.05 on the darkest of
+  // the four light surfaces. Moving a ground is never just the ground: every mark measured
+  // against it moves too.
+  '--accent': '#2061d3', '--active': '#2a8e45', '--danger': '#c42b2b',
   '--success': '#23763a', '--modified': '#8f5d0c',   // 4.6:1 on the light rail
 };
 let _themeEdit = {};   // working overrides while the Appearance tab is open
