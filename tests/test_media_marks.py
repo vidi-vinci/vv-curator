@@ -121,6 +121,51 @@ if '--star' in THEMED:
     fail.append("the light preset redefines --star; it lands on pictures, so it must not flip "
                 "(--star-edge is what carries it on a themed surface)")
 
+# 4b. THE UNFAVOURITED STAR IS ABSOLUTE FOR THE SAME REASON, and this is the half that was missed.
+#     The gold was de-themed on 2026-09-15 and the hollow one was left on light-dark(): black at
+#     .38 for the light preset, WHITE AT .5 for the dark one. On dark, over a pale thumbnail, that
+#     composites to white on white -- 1:1 -- and the author lost one on 2026-09-16. The light half
+#     held the mirrored fault over a dark thumbnail. A picture follows neither theme, so a mark with
+#     no ground of its own cannot be authored per theme, whichever way round it is written.
+es = re.search(r'--card-edge-soft:\s*([^;]+);', SRC)
+if not es:
+    fail.append('--card-edge-soft is gone -- it is the unfavourited star, which has no scrim')
+elif 'light-dark' in es.group(1):
+    fail.append('--card-edge-soft is themed again (%s) -- the idle star lands on a PICTURE, so it '
+                'has to be one absolute value carried by --card-edge-rim' % es.group(1).strip())
+
+# 4c. BOTH TONES, OR NEITHER WORKS. The star is the one mark with no scrim: it is a stroke, and a
+#     stroke is invisible against anything its own value. So it is TWO-TONE -- glyph plus rim -- and
+#     the rim has to be declared for BOTH states. The off state was taking --star-rim's transparent
+#     default, i.e. the one mark with nothing behind it also had nothing drawing its edge.
+for sel, state in (('.card .star', 'idle'), ('.card .star.on', 'gold'),
+                   ('.strip-item .star.on', 'gold, in the filmstrip')):
+    bodies = re.findall(r'(?:^|,\s*|\})\s*' + re.escape(sel) + r'\s*\{([^{}]*)\}', SRC, re.M)
+    if not any('--star-rim' in b for b in bodies):
+        fail.append('%s (%s) sets no --star-rim, so it falls back to transparent and the mark is '
+                    'a bare stroke on an arbitrary picture' % (sel, state))
+
+# 4d. THE FILMSTRIP DRAWS THE SAME STAR, so it needs the same filter. It did not: the card gained
+#     the rim shadow on 2026-09-15 and the strip's copy kept only the dark drop-shadow, under a
+#     comment claiming it was "the same contrast trick as the card's". Same mark, same item, two
+#     renderings depending on which surface you were looking at -- the second card/strip drift after
+#     .set-badge's. Compare the SHADOW COUNT rather than the text, so a reworded comment cannot
+#     satisfy this and a real divergence cannot hide behind one.
+def _shadows(sel):
+    for b in re.findall(re.escape(sel) + r'\s+svg\s*\{([^{}]*)\}', SRC):
+        f = re.search(r'filter\s*:\s*([^;]+)', b)
+        if f:
+            return f.group(1).count('drop-shadow'), ('--star-rim' in f.group(1))
+    return None
+card_sh, strip_sh = _shadows('.card .star'), _shadows('.strip-item .star')
+if not card_sh or not strip_sh:
+    fail.append('one of the two star surfaces no longer declares a filter on its svg')
+elif card_sh != strip_sh:
+    fail.append('the card star and the filmstrip star are drawn differently (card %r, strip %r) -- '
+                'one mark, two surfaces, and they have drifted before' % (card_sh, strip_sh))
+elif not card_sh[1]:
+    fail.append('the star filter no longer composites --star-rim, so neither state has an edge')
+
 # 5. ONE WEIGHT ACROSS THE ICON SET. Fill carries MEANING here, never emphasis: `--icon-star-on` is
 #    filled because filled is what "favourited" means when you take the colour away, and it is the
 #    outline half of a deliberate pair. Everything else is stroked. The play triangle was filled too

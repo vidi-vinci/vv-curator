@@ -26,7 +26,7 @@ than seconds. After that the app starts in about a second, and only looks at wha
 `comfy_vv_saver/` came with the app: copy that folder into your `ComfyUI/custom_nodes/` and restart
 ComfyUI. **VV Run Name** gives a run a root name and a unique ID, and every file carrying that ID
 arrives here as one card — so a run that saved a raw and a detailed version shows up as one joined
-card, and a song arrives with its cover art. **VV Save Image** writes Civitai-ready metadata as it
+card, and audio arrives with its cover art. **VV Save Image** writes Civitai-ready metadata as it
 saves, and lets you open the workflow back in ComfyUI in one click. This applies from here on:
 files you already have are not revisited.
 
@@ -192,7 +192,7 @@ your tick is left alone. Reconnect and they return on their own. Its `⋯` menu 
 the meantime.
 
 **A card is not always a file.** Files from one generation — a still and its video, a set's three
-stages, a song and its cover — collapse into one card, and a mark applies to the whole card. So
+stages, an audio file and its cover — collapse into one card, and a mark applies to the whole card. So
 recycling a card takes the run. Turn the Sets switches off and every file becomes its own card
 again, which is also how you get at the still from a video run.
 
@@ -317,7 +317,7 @@ Ordinary words, used here for particular things.
 |---|---|
 | **Library** | A folder you pointed the app at, **and everything in every folder beneath it** — not just the files sitting directly in it |
 | **Card** | One tile in the grid. Usually one file, sometimes a whole run |
-| **Run** | What one generation produced — the stills, the video, a song and its cover |
+| **Run** | What one generation produced — the stills, the video, the audio and its cover |
 | **Set** | A run's stages collapsed into one card: Raw, Detail, Refine, Upscale, Final. It only groups files the companion ComfyUI nodes stamped, or ones with `MAIN` / `DET` / `REFINE` in the filename — so you may have the switches and never see a set |
 | **Pair** | A still and a video sharing a filename, shown as one card with a ▶ |
 | **Keeper** | The one member of a set or pair you mark to keep. Recycling then takes the others |

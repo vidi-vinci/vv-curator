@@ -4054,6 +4054,31 @@ class Handler(BaseHTTPRequestHandler):
             where.append("EXISTS (SELECT 1 FROM tags tg WHERE tg.image_id=i.id AND tg.source='fav')")
         if q.get('note', [''])[0] == '1':      # "Has notes" — same emptiness test the ✎ card mark uses
             where.append("i.note IS NOT NULL AND TRIM(i.note) <> ''")
+        # Aspect. Both numbers are already on the row for every image AND every video, so this is one
+        # integer comparison per row the query was going to read anyway -- no new column, no index,
+        # nothing to backfill. It reads WHAT A CARD CONTAINS, like every filter but File type: any
+        # member matching brings the whole card, which is what you want for a set whose members are
+        # all the same shape and harmless for the rare one where they are not.
+        #
+        # SQUARE IS A TOLERANCE, NOT AN EQUALITY, and that is the author's call (2026-09-16): an
+        # upscale or a crop lands a pixel or two off, and a 1024x1026 render filed under Landscape
+        # reads as a bug rather than as precision. 2% of the LONGER side, so the band does not widen
+        # with the picture -- ABS(w-h)*50 <= MAX(w,h) is the same test without floating point.
+        # Portrait and landscape are then defined AGAINST it rather than against each other, so the
+        # three are non-overlapping and every shaped file lands in exactly one.
+        #
+        # A NULL DIMENSION FAILS EVERY COMPARISON, which is how songs stay out without naming them:
+        # a song has no picture and so has no shape. Anything else with dimensions missing -- an
+        # unreadable file -- drops out the same way, which is the honest answer rather than guessing.
+        aspect = q.get('aspect', [''])[0]
+        if aspect in ('portrait', 'landscape', 'square'):
+            sq = "ABS(i.width - i.height) * 50 <= MAX(i.width, i.height)"
+            if aspect == 'square':
+                where.append("i.width > 0 AND i.height > 0 AND " + sq)
+            elif aspect == 'portrait':
+                where.append("i.width > 0 AND i.height > 0 AND i.height > i.width AND NOT " + sq)
+            else:
+                where.append("i.width > 0 AND i.height > 0 AND i.width > i.height AND NOT " + sq)
         # exclude: drop anything matching ANY excluded term (positive/model/filename)
         xfts = to_fts(q.get('x', [''])[0], ' OR ')
         if xfts:

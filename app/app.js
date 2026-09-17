@@ -1,7 +1,7 @@
 'use strict';
 
 const $ = (s) => document.querySelector(s);
-const state = { terms: [], xterms: [], model: '', folder: '', modelFolder: '', meta: '', type: '', group: true, sets: true, tags: [], favOnly: false,
+const state = { terms: [], xterms: [], model: '', folder: '', modelFolder: '', meta: '', type: '', aspect: '', group: true, sets: true, tags: [], favOnly: false,
                 hasNote: false,
                 // Selected root keys for show/hide ([] = all roots). SCOPE, NOT A FILTER: Reset
                 // never clears it and a snapshot never carries it — it is which libraries you are
@@ -548,7 +548,7 @@ function clearXTerms() {
 function serializeFilters() {
   return {
     terms: state.terms, xterms: state.xterms, model: state.model, folder: state.folder, modelFolder: state.modelFolder,
-    meta: state.meta, type: state.type, group: state.group, sets: state.sets, tags: state.tags, favOnly: state.favOnly,
+    meta: state.meta, type: state.type, aspect: state.aspect, group: state.group, sets: state.sets, tags: state.tags, favOnly: state.favOnly,
     hasNote: state.hasNote,
     rmin: state.rmin, rmax: state.rmax,
     dfrom: state.dfrom, dto: state.dto,
@@ -582,6 +582,11 @@ function normalizeFilters(f) {
   o.xterms = Array.isArray(f.xterms) ? f.xterms.slice() : [];
   o.model = f.model || ''; o.folder = f.folder || ''; o.modelFolder = f.modelFolder || ''; o.meta = f.meta || '';
   o.type = f.type || '';
+  // Every snapshot saved before aspect existed has no `aspect` key, and the `|| ''` is what stops
+  // those normalising to undefined -- which would then reach the URL as the literal string
+  // "undefined" and be silently ignored by a server that only recognises three values. An unknown
+  // value is inert by construction at the other end too, so there is no list here to keep in step.
+  o.aspect = f.aspect || '';
   o.group = (f.group === undefined ? true : !!f.group);   // merge still+video pairs, default on
   o.sets = (f.sets === undefined ? true : !!f.sets);      // merge image sets (MAIN/DET/REFINE), default on
   o.tags = Array.isArray(f.tags) ? f.tags.slice() : [];
@@ -610,7 +615,7 @@ function applyFilters(f) {
   const n = normalizeFilters(f);
   state.terms = n.terms; state.xterms = n.xterms;
   state.model = n.model; state.folder = n.folder; state.modelFolder = n.modelFolder; state.meta = n.meta;
-  state.type = n.type; state.group = n.group; state.sets = n.sets;
+  state.type = n.type; state.aspect = n.aspect; state.group = n.group; state.sets = n.sets;
   state.tags = n.tags;
   state.favOnly = n.favOnly;
   state.hasNote = n.hasNote;
@@ -623,6 +628,7 @@ function applyFilters(f) {
   renderFacetDD('model'); renderFacetDD('folder');
   $('#sort').value = sortSelectValue();   // normalizeFilters already guaranteed the option exists
   renderMediaType();
+  renderAspect();
   if ($('#hasNote')) $('#hasNote').checked = state.hasNote;
   if ($('#mfolder')) $('#mfolder').value = state.modelFolder;   // options refill on loadFacets
   renderSetsMode();
@@ -653,6 +659,21 @@ function renderMediaType() {
   // paints .active, so the two can never disagree; deliberately not inferred from :first-child,
   // which is true today and would break silently if a segment were ever reordered.
   $('#mediaType').classList.toggle('at-default', !state.type);
+}
+// Aspect. The same idiom as renderMediaType above and deliberately a separate function rather than a
+// parameterised one: the two bars look alike and are NOT alike -- File type carries the segConflict
+// dimming (some of its pairs are empty by construction), and aspect has no conflicts at all,
+// because every combination of aspect and file type can hold results. Folding them together would mean
+// giving this bar a conflict lookup that always answers no, which is how a rule nobody needs
+// becomes a rule nobody can remove.
+function renderAspect() {
+  document.querySelectorAll('#aspect button').forEach(b => {
+    const on = (b.dataset.aspect || '') === state.aspect;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  // Same "a bar at its default is filtering nothing" rule the two bars beside it follow.
+  $('#aspect').classList.toggle('at-default', !state.aspect);
 }
 // The "Sets" dropdown maps to the two independent collapse flags: state.group (video sets =
 // still+video pairs) and state.sets (image sets). One control, four combinations.
@@ -1058,7 +1079,7 @@ async function loadFacets() {
   // is in Help under Known gaps and is not what this line fixes.
   const p = new URLSearchParams({
     q: queryString(), model: state.model, folder: state.folder, mfolder: state.modelFolder,
-    meta: state.meta, type: state.type, group: state.group ? '1' : '',
+    meta: state.meta, type: state.type, aspect: state.aspect, group: state.group ? '1' : '',
     tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '', x: excludeString(),
     roots: rootsParam(), rmin: state.rmin, rmax: state.rmax,
     after: dateAfter(), before: dateBefore(),
@@ -1452,7 +1473,7 @@ async function loadTags() {
   // the next filter being forgotten here the way `type` was forgotten in loadFacets.
   const p = new URLSearchParams({
     q: queryString(), x: excludeString(), model: state.model, folder: state.folder,
-    mfolder: state.modelFolder, meta: state.meta, type: state.type,
+    mfolder: state.modelFolder, meta: state.meta, type: state.type, aspect: state.aspect,
     group: state.group ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(),
     rmin: state.rmin, rmax: state.rmax, after: dateAfter(), before: dateBefore(),
   });
@@ -1745,7 +1766,13 @@ function cardHTML(it) {
   // (A lone video reports its own id as video_id, so require the face to be a still to count as a pair.)
   // (Audio joins the ▶ set for the same reason a video is in it: opening the card plays something.)
   const paired = it.video_id != null && !it.is_video;   // merged still+video = a video set
-  const playKind = it.is_audio ? 'Song' : ((it.is_video || paired) ? 'Video' : 'Animated');
+  // AUDIO, NOT SONG, and the set is the reason: the other two values here are Video and Animated,
+  // which name what the file IS. "Song" named what it usually HOLDS, which was true of everything
+  // in this library until it wasn't -- the author started testing a second music generator and the
+  // gap showed up straight away. Renamed throughout on his call, 2026-09-16, EXCEPT where a
+  // sentence is genuinely about a song: Help still says a song's lyrics, because lyrics are not a
+  // property of audio.
+  const playKind = it.is_audio ? 'Audio' : ((it.is_video || paired) ? 'Video' : 'Animated');
   const motion = (it.motion || it.is_video || it.is_audio || paired)
     ? `<span class="motion-badge${it.is_audio ? ' song' : ''}" title="${playKind}"></span>` : '';
   const setBadge = (it.is_set || paired)
@@ -1844,7 +1871,7 @@ function thumbAt(url, cssPx) {
 //     says must not flip this on.
 // The strip keeps its own signal: renderLibTrigger() colours the `▤ 1/4` readout beside the count.
 function filtersActive() {
-  return !!(state.terms.length || state.xterms.length || state.model || state.folder || state.modelFolder || state.meta || state.type ||
+  return !!(state.terms.length || state.xterms.length || state.model || state.folder || state.modelFolder || state.meta || state.type || state.aspect ||
             state.tags.length || state.favOnly || state.hasNote ||
             state.rmin !== '' || state.rmax !== '' ||
             state.dfrom || state.dto ||
@@ -1910,6 +1937,7 @@ function tabCounts() {
   if (state.modelFolder) filters++;
   if (state.meta) filters++;
   if (state.type) filters++;
+  if (state.aspect) filters++;
   if (state.group === false || state.sets === false) filters++;   // Sets away from default (merge both)
   if (state.rmin !== '' || state.rmax !== '') filters++;
   if (state.dfrom || state.dto) filters++;
@@ -1984,7 +2012,7 @@ let _searchSeq = 0;   // supersede token: a filter change invalidates any in-fli
 function searchParams(offset, limit) {
   return new URLSearchParams({
     q: queryString(), x: excludeString(), model: state.model, folder: state.folder, mfolder: state.modelFolder, meta: state.meta,
-    type: state.type, group: state.group ? '1' : '', sets: state.sets ? '1' : '', tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(),
+    type: state.type, aspect: state.aspect, group: state.group ? '1' : '', sets: state.sets ? '1' : '', tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(),
     rmin: state.rmin, rmax: state.rmax, after: dateAfter(), before: dateBefore(),
     sort: state.sort, order: state.order, limit: (limit || state.limit), offset: offset,
     // Only meaningful to sort=random, and harmless otherwise. It MUST be identical for every page
@@ -2555,7 +2583,7 @@ function toggleSelect(card, shift) {
 }
 async function selectAllMatching() {
   const p = new URLSearchParams({ q: queryString(), x: excludeString(), model: state.model, folder: state.folder, mfolder: state.modelFolder,
-    meta: state.meta, type: state.type, group: state.group ? '1' : '', sets: state.sets ? '1' : '', tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(), rmin: state.rmin, rmax: state.rmax, after: dateAfter(), before: dateBefore(),
+    meta: state.meta, type: state.type, aspect: state.aspect, group: state.group ? '1' : '', sets: state.sets ? '1' : '', tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(), rmin: state.rmin, rmax: state.rmax, after: dateAfter(), before: dateBefore(),
   });
   const data = await getJSON('/api/ids?' + p.toString());
   selection.clear();
@@ -7333,6 +7361,13 @@ $('#mediaType').addEventListener('click', e => {
   // BOTH bars repaint, because each one's conflict state is a function of the other. Painting only
   // the bar that was clicked would leave the other still dimming a segment that is now fine.
   renderMediaType(); renderSetsMode();
+  search(true);
+});
+// Shape: same delegated click as File type. No segConflict call -- see renderAspect.
+$('#aspect').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  state.aspect = b.dataset.aspect || '';
+  renderAspect();
   search(true);
 });
 $('#hasNote').addEventListener('change', e => { state.hasNote = e.target.checked; search(true); });
