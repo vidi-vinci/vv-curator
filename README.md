@@ -121,7 +121,7 @@ your Python, and a few view preferences your browser keeps for the page.
 - **Back into ComfyUI** — drag any card onto the canvas to reload its workflow, or open it in one
   click with the companion nodes installed.
 - **Not just PNGs.** Video and audio are indexed and played, with their settings read from inside the
-  file; audio gets a drawn card instead of a thumbnail; and downloaded JPEGs and WebPs keep their
+  file; songs get a drawn card instead of a thumbnail; and downloaded JPEGs and WebPs keep their
   prompt, model and LoRAs in EXIF, which is read too — including images saved from Civitai, which
   record theirs differently from everyone else.
 

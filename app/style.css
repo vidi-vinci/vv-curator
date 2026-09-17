@@ -205,32 +205,12 @@
      NEUTRAL rather than accent-tinted: a blue halo is close to what "selected" means elsewhere, and
      a grid full of them would compete with the one card actually selected. */
   --card-lift: light-dark(rgba(18,32,56,.20), rgba(255,255,255,.13));
-  /* THE FILMSTRIP'S VERSION OF THE SAME LIFT, and a separate token because the mechanism has to
-     differ: a strip item lives in an overflow-y:hidden scroller, so it cannot cast --card-lift
-     past its own edges -- the glow would be clipped flat top and bottom and drawn only at the
-     sides. It lightens its own GROUND instead, which stays inside the box the scroller allows.
-     Mixed from --fg so a custom theme brings its own, and so the dark and light halves move in
-     opposite directions for free: on dark it is a step up out of --bg3, on light a step down into
-     it, which is what "lifted" looks like on each. See .strip-item:hover. */
-  --strip-lift: color-mix(in srgb, var(--bg3), var(--fg) 12%);
   --card-scrim:        light-dark(rgba(255,255,255,.74), rgba(0,0,0,.6));
   --card-scrim-soft:   light-dark(rgba(255,255,255,.55), rgba(0,0,0,.4));
   --card-scrim-strong: light-dark(rgba(255,255,255,.86), rgba(0,0,0,.78));
   --card-ink:          light-dark(#2a2f36, #ffffff);
   --card-edge:         light-dark(rgba(0,0,0,.6),  rgba(255,255,255,.85));
-  /* THE UNFAVOURITED STAR, and it is ABSOLUTE for exactly the reason --star is: this mark's home is
-     the corner of a PICTURE, and a picture is not themed. Themed, it was
-     light-dark(rgba(0,0,0,.38), rgba(255,255,255,.5)) -- and on dark, over a pale thumbnail, a
-     half-transparent white stroke composites to white ON white. 1:1. The author lost one on
-     2026-09-16; the light half had the same fault mirrored, over a dark thumbnail, waiting.
-     NO SINGLE COLOUR SURVIVES AN ARBITRARY PICTURE, which is the whole finding. A stroke is
-     invisible against anything its own value, so the mark has to be TWO-TONE -- a light glyph with
-     a dark rim, the same construction the gold star was given on 2026-09-15 and for the same
-     reason. This is 1.4.11's answer too: the boundary carries the contrast.
-     OPAQUE, and that is load-bearing rather than tidy: drop-shadow multiplies the SOURCE alpha, so
-     a glyph at .5 would have produced a rim at half strength -- the fix quietly undoing itself. */
-  --card-edge-soft:    rgba(255,255,255,.92);
-  --card-edge-rim:     rgba(0,0,0,.8);
+  --card-edge-soft:    light-dark(rgba(0,0,0,.38), rgba(255,255,255,.5));
   --scrim: rgba(0,0,0,.6);          /* card control backgrounds (zoom, score, badge) */
   --scrim-strong: rgba(0,0,0,.78);  /* full overlays (detail bg, caption gradient) */
   --scrim-dim: light-dark(rgba(255,255,255,.66), rgba(0,0,0,.5));      /* nav / close buttons, over the picture */
@@ -1822,11 +1802,7 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
 .card .star svg { width: var(--card-badge-h); height: var(--card-badge-h); }
 
 /* favorite — top right */
-/* --star-rim IS SET FOR BOTH STATES NOW. It defaults to transparent (see the filter below), and the
-   off state was taking that default -- so the one mark on a card with no scrim behind it was also
-   the one with nothing drawing its edge. .card .star.on still overrides this with --star-edge, the
-   gold's own rim, and wins on specificity (0,3,0) over (0,2,0). */
-.card .star { right:var(--space-2); color: var(--card-edge-soft); --star-rim: var(--card-edge-rim); }
+.card .star { right:var(--space-2); color: var(--card-edge-soft); }
 /* No badge scrim, unlike its neighbours on the left: this one carries a drop shadow instead, so a
    pale outline stays legible over a bright thumbnail without putting a filled box in the corner of
    every picture. A literal, and allowed to be one — every --shadow-* token is a BOX shadow, and one
@@ -1857,12 +1833,7 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
    click not having taken: The author, 2026-08-28, "the star turns white until I release the mouse. just
    make it yellow." Same guard .mark-toggle and .copy-ic already carry; the card was the one place
    missing it. */
-/* ABSOLUTE like the resting colour above, and no longer --card-edge: that token is themed and is
-   still right for the two controls it borders, but on this mark it would have put the hover BACK on
-   the axis the resting state just came off -- pointing at a star over a pale thumbnail in the dark
-   theme would have taken it from .92 white to .85 white, i.e. from legible to gone. It goes to
-   solid white; the rim is unchanged and keeps carrying the edge. */
-.card .star:not(.on):hover { color: #fff; }
+.card .star:not(.on):hover { color: var(--card-edge); }
 /* AND THE GOLD STATE GETS ITS OWN STEP. Scoping the hover off .on stopped it painting white, and
    left it ignoring the pointer entirely -- which this note's own rule calls out: a mark that does
    not react "reads as decoration rather than a control". The author, 2026-08-28: "the star still needs a
@@ -3329,45 +3300,11 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
    are --bg3 -- the same rule as the card, applied to a different surface, rather than the same
    VALUE copied across. */
 .strip-item img { width: 100%; height: 100%; object-fit: contain; display: block; background: var(--bg3); }
+.strip-item:hover { outline: 1px solid var(--border); outline-offset: -1px; }
 /* CURRENT is an inset outline, never a border or a margin: the strip auto-scrolls to keep this item
    in view, and anything that changes an item's box would shift every neighbour each time you press
-   an arrow — the scroll position would then chase a target that moved because of the scroll.
-   3px, LIKE .card.selected — see the hover block below for why the two widths have to differ. */
-.strip-item.current { outline: 3px solid var(--accent); outline-offset: -3px; }
-/* HOVER LIFTS, SELECTION DOES NOT — the card's rule (DESIGN.md), now true of the strip as well.
-   IT HAD STOPPED SAYING ANYTHING. Hover used to be carried by BRIGHTNESS: every item that was not
-   .current sat at opacity .55 and hovering took it back to 1. That dimming was removed on
-   2026-09-09 at the author's request — "they seem inactive, when the selected highlight does
-   enough" — and he was right, but what was left behind was `outline: 1px solid var(--border)`, a
-   line written as a faint SUPPLEMENT to the brightness jump and never re-judged once the jump was
-   gone. On the dark theme that is #2c313a on a #23272f tile, about 1.15:1, i.e. nothing. It read in
-   the light preset only because the contrast work of 2026-09-16 took light's --border to #a7afbf,
-   so one theme's hover got stronger and the other's did not, which is how he found it: "the
-   hover/rollover in the Detail filmstrip has become too subtle".
-   THE FIX IS THE CARD'S, NOT A VALUE. The grid card had this exact complaint answered a day earlier
-   and the answer became a design-system rule; the strip shows the SAME items through the same
-   shared marks, so a second, quieter vocabulary for "you are pointing at this" is the fault. Two
-   states, separated by width AND the lift, exactly as .card.selected is separated from .card:hover.
-   SCOPED OFF .current AND PLACED AFTER IT: at equal specificity a later 2px rule would drop the
-   current item to the thinner ring the moment you pointed at it. Same source-order trap DESIGN.md
-   records against the card. A hovered current item keeps its 3px and gains the lift.
-   THE LIFT IS A GROUND, NOT A SHADOW, and that is forced: .strip-scroll is overflow-y:hidden and
-   an item is height:100% of it, so a box-shadow's glow would be clipped flat top and bottom and
-   drawn only left and right — worse than none. The item lightens its own fill instead, and its
-   img carries the same value so a letterboxed thumbnail lifts as ONE object rather than growing a
-   pale frame around the picture. Same idea as --card-lift, expressed on a surface that cannot cast
-   a shadow off itself. */
-/* THE ITEM AND EVERY FACE IT CAN WEAR, in one selector list, because a strip item is one of three
-   things: a picture on a letterbox (img), a song's drawn face (.strip-song), or the item's own fill
-   while a thumbnail is still loading. Each declares --bg3 in its own right and each covers the item
-   completely, so lifting only the button would have left a song and a loading tile flat -- which is
-   EXACTLY how the dimming this replaces was half-applied: it keyed off `img`, so a song never
-   dimmed and a mixed strip came out at two brightnesses. Fixing the cue without fixing its reach
-   would have shipped the same bug twice. */
-.strip-item:hover,
-.strip-item:hover img,
-.strip-item:hover .strip-song { background: var(--strip-lift); }
-.strip-item:hover:not(.current) { outline: 2px solid var(--accent); outline-offset: -2px; }
+   an arrow — the scroll position would then chase a target that moved because of the scroll. */
+.strip-item.current { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* NO FADE ON THE ONES YOU ARE NOT LOOKING AT. Every item that was not .current sat at opacity .55,
    which the 2px accent outline above already says better — and says without making the pictures
    harder to read, which is the strip's whole job. The author: "they seem inactive, when the selected
@@ -3406,15 +3343,9 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
 }
 .strip-item .star svg {
   width: var(--glyph-sm); height: var(--glyph-sm);
-  /* THE SAME TWO SHADOWS THE CARD CARRIES, and the comment here used to CLAIM that while declaring
-     only the first. The card's star gained --star-edge, the gold's contrast rim, on 2026-09-15 and
-     this copy was not touched -- so the same mark, on the same item, was drawn two ways depending on
-     which surface you were looking at. The strip shows a star only in its .on state (it is
-     display-only here), so what was missing was exactly the rim that state depends on. Stated as
-     --star-rim rather than --star-edge so the card's mechanism reaches this surface whole. */
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,.9)) drop-shadow(0 0 1px var(--star-rim, transparent));
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.9));   /* same contrast trick as the card's */
 }
-.strip-item .star.on { opacity: 1; --star-rim: var(--star-edge); }
+.strip-item .star.on { opacity: 1; }
 .strip-item .star.on svg { fill: currentColor; }   /* FILLED, not just gold — see .card .star.on */
 .strip-item .strip-play {
   font-size: var(--text-xs); line-height: 1;

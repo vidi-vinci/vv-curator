@@ -94,21 +94,6 @@ compete with the one card actually selected.
 > specificity a selected card under the pointer would drop to the thinner ring. Same source-order
 > trap the grid card's gold star hit in August.
 
-**The filmstrip item follows the same rule, with a different lift.** A strip item is a card by
-another name — same marks, same states — so it takes the same 2px accent hover ring, the same 3px
-ring when it is the current item, and the same `:not()` scoping and source order. What it cannot
-take is `--card-lift`: `.strip-scroll` is `overflow-y: hidden` and an item is `height: 100%` of it,
-so there are **zero pixels above or below** for a shadow to draw in and the glow would be clipped
-flat top and bottom. It lifts its own **ground** instead, `--strip-lift`, which stays inside the box
-the scroller allows. Mixed from `--fg` rather than written twice, so it steps up out of `--bg3` on
-dark and down into it on light — both away from the row's colour, which is what reads as lifted on
-either. Every face the item can wear — the `img`, `.strip-song`, the bare button while a thumbnail
-loads — declares `--bg3` in its own right and covers the item, so all three are in the selector list.
-
-> **A state cue that is a fill, not an outline, has to name every surface that can cover the box.**
-> The dimming this replaced keyed off `img` alone, so a song's drawn face never dimmed and a mixed
-> strip sat at two brightnesses. The same trap is one selector away from any `:hover { background }`.
-
 **The marks scale with the card.** `--card-badge-h` is 16px at Small and Medium, 20px on
 `.grid.cards-lg` (256) and 24px on `.grid.cards-xl` (512). It was flat at every size, so a badge
 went from 12.5% of a Small card to 3.1% of an Extra-large one — the author, on Large: *"they

@@ -1787,63 +1787,8 @@ def extract(path):
     # AFTER the graph, so a traced model still wins; the A1111 block only fills what was left empty.
     # The PNG chunk is tried first and EXIF only when it is absent — a PNG is never read twice, and
     # the file is only opened for a format that could carry EXIF at all.
-    a1111 = chunks.get('parameters') or read_exif_a1111(path)
-    _fill_from_a1111(res, a1111)
-    # A PROMPT YOU STATED BEATS ONE WE INFERRED, but only on a file our own saver wrote.
-    # `vv_set_id` is the stamp, read above, and it is the whole guard: a third-party `parameters`
-    # block still cannot overrule the graph, which is what _fill_from_a1111's never-overwrite rule
-    # was protecting against.
-    if res['set_id']:
-        _prefer_declared_prompt(res, a1111)
+    _fill_from_a1111(res, chunks.get('parameters') or read_exif_a1111(path))
     return res
-
-
-def _strip_lora_tags(s):
-    return _LORA_TAG_RE.sub('', s or '').strip()
-
-
-def _prefer_declared_prompt(res, text):
-    """Let VV Run Name's wired `positive_prompt` override what the graph walk guessed.
-
-    THE PROBLEM, reported 2026-09-16: a cover-art workflow generated from a short description, with
-    a concat of the song's style and lyrics wired into VV Run Name as the run's real prompt. The
-    node does its job -- `run_data.positive` reaches the saver and lands in the `parameters` chunk --
-    and the app then declined it, because the graph walk had already found the cover workflow's own
-    CLIPTextEncode and _fill_from_a1111 fills gaps without ever overwriting. So the STATED answer
-    lost to the INFERRED one. The author's call to reverse that, scoped to our own files.
-
-    THE TEST FOR "STATED" IS THAT THE TWO DISAGREE, and it works because of how the node builds the
-    chunk: `pos = positive if positive else _text_from(g, sid, "positive")`. Wire nothing and it
-    writes back exactly what the graph says, so the two agree and there is nothing to prefer. Wire
-    something and they diverge. No new marker is needed, which is what lets a rescan fix the images
-    already on disk rather than only the ones saved from here on.
-
-    LORA TAGS ARE NORMALISED OUT OF BOTH SIDES FIRST, and that is not cosmetic. parse_a1111 lifts
-    `<lora:name:weight>` out of the positive; the graph walk does NOT (it reads LoRAs from the loader
-    nodes instead, so it has no reason to). A comment at that transform claims the two behave alike
-    and they do not. Comparing raw, every VV-saved image whose prompt carries lora tags would look
-    like a disagreement, and the "fix" would have stripped those tags from the prompt across the
-    whole library.
-    """
-    got = parse_a1111(text)
-    if not got:
-        return
-    for k in ('positive', 'negative'):
-        declared = (got.get(k) or '').strip()
-        if not declared or _is_placeholder(declared):
-            continue
-        current = (res.get(k) or '').strip()
-        # UNREACHABLE TODAY, and kept deliberately rather than deleted: _fill_from_a1111 runs first
-        # and fills an empty field from this very block, so by here `current` is either the graph's
-        # answer or already `declared`. Mutation-testing flagged this line as equivalent — removing
-        # it changes nothing — which is exactly why it is worth a note instead of a silent guard
-        # that a future reader assumes is load-bearing. It earns its keep only if the fill order
-        # ever changes.
-        if not current:
-            continue
-        if _strip_lora_tags(current) == declared:
-            continue                              # the node wrote the graph back; nothing was stated
-        res[k] = declared
 
 
 def _from_graph(pj, res):
