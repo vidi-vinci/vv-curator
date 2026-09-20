@@ -21,6 +21,8 @@ than seconds. After that the app starts in about a second, and only looks at wha
   model, the filename and the folder at once, so you don't have to know which one it was.
 - **Click the middle of a card** (or double-click it) to open the detail viewer, then use the
   left/right arrows to keep browsing from there.
+- **Press `z` in the detail viewer** to put a magnifier under the pointer, for checking a face or a
+  hand without opening anything. Tap it again to step the zoom, once more to put it away.
 
 **To get the most out of VV Curator, use the companion ComfyUI nodes in your workflows.**
 `comfy_vv_saver/` came with the app: copy that folder into your `ComfyUI/custom_nodes/` and restart
@@ -284,6 +286,46 @@ would match everything.
 fifteen seconds to go — a refresh looks the same from the outside for a moment, so it waits to see
 whether you come back. A scan keeps it alive until it has finished.
 
+## Posting to Civitai
+
+**Most images need no export.** If the file was saved by the VV saver node in ComfyUI, it already
+carries everything Civitai reads — upload the file itself and the prompt, model, settings and LoRAs
+come with it.
+
+**Civitai does not read the ComfyUI workflow.** It reads a short block of plain text that the VV
+saver writes alongside it. Where that block is missing or incomplete, Civitai falls back to reading
+the workflow, and on a real graph that gets it nothing at all: the picture arrives with no prompt,
+no model and no settings.
+
+**The one value it cannot do without is `Steps:`.** A workflow that never records a step count
+produces a block Civitai will not read — not a block missing one row, but no metadata at all. If an
+image lands blank there, that is the first thing to suspect.
+
+### Export for Civitai
+
+The ⬇ button in the detail bar, on PNG images only. It reads the workflow, writes the same text
+block from it, and removes ComfyUI's own data so nothing sends Civitai down the wrong path. The copy
+goes to your browser's downloads as `<filename>.civitai.png`, and that is the file you upload.
+
+Use it for images the VV saver didn't make. **The exported copy will not open in ComfyUI** — the
+workflow is what was removed.
+
+### Getting your models linked, not just named
+
+Civitai matches a checkpoint or LoRA by a fingerprint of the file, never by its name. Point the app
+at your ComfyUI models folder — *Models folder…* in a library's `⋯` menu, or the one in Settings for
+all of them — and it works those out at export time, so each resource links to its page. Without it
+they still appear, as text, linked to nothing. The first read of a large checkpoint is slow; it is
+remembered afterwards.
+
+**A LoRA the folder doesn't contain stays unlinked** rather than being matched to something close.
+
+### Video and audio
+
+**Civitai reads nothing at all from a video file.** Use the copy button beside the export one — it
+puts a labelled block on the clipboard, one value per line, to paste into the post's own fields.
+Generation settings are left out for video, where they describe the still rather than the clip.
+
 ## Where your things live
 
 | Path | Holds |
@@ -310,8 +352,8 @@ The app serves itself on **port 8770**. Nothing leaves your machine.
   larger than the number of cards you get.
 - **A video's prompt often can't be read** — many video workflows keep their text in nodes the
   tracer can't follow. Model, seed and settings come through; a `.txt` sidecar covers the prompt.
-- **WebM carries no readable metadata here** (MP4 and MOV only), and of the audio formats only MP3
-  is read.
+- **WebM carries no readable metadata here** (MP4 and MOV only), and of the audio formats MP3 and
+  FLAC are read.
 
 ## Glossary
 
