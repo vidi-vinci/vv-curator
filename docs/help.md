@@ -137,6 +137,9 @@ keyboard; a checkbox or a slider does not swallow shortcuts.
 
 ## Settings, and what each one starts as
 
+**There is no Save button.** Every setting applies and is kept the moment you change it, and the
+line at the bottom of the window says so. Typed boxes save when you stop typing.
+
 **General**
 
 | Setting | Default |
@@ -168,14 +171,15 @@ never downloads or installs anything — updating is still you replacing the fol
 stops the request itself, not just the icon.
 
 **Cards** sets which details appear on a card and in what order — Dimensions · Duration · Age · File
-size · Model · Folder, each Always / On hover / Off. **Appearance** is Dark, Light or Custom plus
-live colour pickers, saved per install; touching any picker moves you to Custom, and the preset you
-were on is one click away again. **Miner** tunes what **Scan for tags** counts as a candidate — it is in a
+size · Model · Folder, each Always / On hover / Off. **Appearance** is Dark or Light plus live
+colour pickers, saved per install. **Each mode keeps its own colours**: a swatch you change while
+on Dark belongs to Dark, so switching to Light and back finds your work where you left it, and
+**Reset** puts the mode you are on back to its defaults without touching the other. **Miner** tunes what **Scan for tags** counts as a candidate — it is in a
 library's `⋯` menu, and reads your positive prompts, folder names and file names to suggest
 tags from what it finds.
 
 **Extensions** lists what is in the `extensions/` folder. A row reads **Ready**, **Off**, **Not set
-up**, **Setting up…** or **Not loading** (with the reason). The on/off switch saves immediately.
+up**, **Setting up…** or **Not loading** (with the reason).
 **Set up…** opens the extension's own console window and downloads what it needs; the button stays
 as **Re-run setup…** afterwards, because re-running is also how you repair an install.
 

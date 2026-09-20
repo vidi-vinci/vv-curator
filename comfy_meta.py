@@ -12,9 +12,11 @@ Pure standard library (struct/zlib/json) — no Pillow needed for metadata.
 Designed to be defensive: unknown / exotic workflows fall back to heuristics
 rather than raising.
 """
+import base64
 import struct
 import zlib
 import json
+import heapq
 import os
 import re
 import time
@@ -307,27 +309,75 @@ def _follow_to_text(g, ref, seen=None, depth=0):
     return ''
 
 
+# The chain is followed by more than one key name, and it has to be. On every one of the author's
+# real files this returned None and the right answer arrived by luck through the any-loader fallback
+# below -- because an rgthree Context node carries the model onward under `base_ctx`, and the walk
+# stopped dead at the first one. A relay is a relay whatever it calls its input.
+_MODEL_CHAIN_KEYS = ('model', 'guider', 'base_ctx', 'ctx', 'context', 'model_opt')
+
+
+# A SAMPLER DOES NOT ALWAYS HOLD ITS OWN PROMPT. `KSampler` does, so the reader only ever looked
+# there -- but `SamplerCustomAdvanced`, which is what the author's LTX and MiniMax video work runs
+# on, takes a `guider` instead, and the positive, the negative and the model all sit on THAT.
+# `CFGGuider` spells them positive/negative; `BasicGuider` carries one `conditioning` and no
+# negative at all, which is correct for a model that has none.
+#
+# So the prompt is asked for where it actually is, following a bounded hop rather than assuming the
+# one shape. Without this the saver walk lands on exactly the right sampler and still reads nothing
+# off it, and the file falls back to the longest prompt in the graph -- which is the guess this
+# whole change exists to remove.
+_GUIDER_KEYS = ('guider', 'conditioning_source', 'cfg_guider')
+
+
+def _sampler_conditioning(g, sid, depth=4):
+    """(positive, negative) as they are wired on this sampler, following a guider when it has one.
+
+    Either may be None. A reference is returned rather than text, so the caller resolves it exactly
+    as it always has.
+    """
+    node = g.get(str(sid))
+    seen = set()
+    while node is not None and depth > 0:
+        inp = node.get('inputs') or {}
+        if 'positive' in inp or 'negative' in inp:
+            return inp.get('positive'), inp.get('negative')
+        if 'conditioning' in inp:                 # BasicGuider: one conditioning, no negative
+            return inp.get('conditioning'), None
+        nxt = None
+        for k in _GUIDER_KEYS:
+            v = inp.get(k)
+            if _is_link(v) and str(v[0]) not in seen:
+                nxt = str(v[0])
+                break
+        if nxt is None:
+            return None, None
+        seen.add(nxt)
+        node = g.get(nxt)
+        depth -= 1
+    return None, None
+
+
 def _resolve_model(g, start_id):
-    """Follow the `model` input chain back to the root loader's filename."""
+    """Follow the model input chain back to the root loader's filename."""
     cur = g.get(str(start_id))
     seen = set()
     for _ in range(64):
         if not cur:
             break
-        ct = cur.get('class_type', '')
         inp = cur.get('inputs', {})
         val = _loader_filename(cur)
         if val:
             return val
-        m = inp.get('model')
-        if _is_link(m):
-            nid = str(m[0])
-            if nid in seen:
+        nxt = None
+        for k in _MODEL_CHAIN_KEYS:
+            m = inp.get(k)
+            if _is_link(m) and str(m[0]) not in seen:
+                nxt = str(m[0])
                 break
-            seen.add(nid)
-            cur = g.get(nid)
-            continue
-        break
+        if nxt is None:
+            break
+        seen.add(nxt)
+        cur = g.get(nxt)
     return None
 
 
@@ -366,12 +416,17 @@ def _vae_from_link(g, link):
         named = _vae_named_by(cur)
         if named:
             return named
-        nxt = (cur.get('inputs') or {}).get('vae')
-        if _is_link(nxt) and str(nxt[0]) not in seen:
-            seen.add(str(nxt[0]))
-            cur = g.get(str(nxt[0]))
-            continue
-        break
+        cinp = cur.get('inputs') or {}
+        nxt = None
+        for k in ('vae', 'base_ctx', 'ctx', 'context'):   # same relay problem as the model chain
+            v = cinp.get(k)
+            if _is_link(v) and str(v[0]) not in seen:
+                nxt = str(v[0])
+                break
+        if nxt is None:
+            break
+        seen.add(nxt)
+        cur = g.get(nxt)
     return None
 
 
@@ -388,10 +443,29 @@ def _vae_from_link(g, link):
 # A checkpoint with a baked-in VAE yields NOTHING here, and that is correct rather than a gap: the
 # chain ends at a loader naming a checkpoint, not a VAE. The row then hides, which reads as "this
 # run didn't choose one" — printing the checkpoint's name would claim a fact the file never states.
-def _resolve_vae(g):
+def _is_vae_decode(ct, want_audio=False):
+    """Is this class a VAE decoder? Compared with spaces and underscores removed and case ignored,
+    because "CR VAE Decode" and "Vae Decode (mtb)" are both real, both in the author's install, and
+    both invisible to the exact substring this used to test for."""
+    low = (ct or '').lower().replace(' ', '').replace('_', '')
+    if 'vaedecode' not in low:
+        return False
+    return want_audio or 'audio' not in low
+
+
+def _resolve_vae(g, prefer=()):
+    # THE DECODER THAT MADE THIS PICTURE, when the saver walk found one. Taken off the walk's own
+    # path rather than searched for, so a graph holding two decoders cannot answer with the wrong
+    # one -- which is the whole reason the audio exclusion below had to exist.
+    for nid in (prefer or ()):
+        node = g.get(str(nid))
+        if not node:
+            continue
+        named = _vae_from_link(g, (node.get('inputs') or {}).get('vae'))
+        if named:
+            return named
     for node in g.values():
-        ct = node.get('class_type', '')
-        if 'VAEDecode' not in ct or 'Audio' in ct:
+        if not _is_vae_decode(node.get('class_type', '')):
             continue
         named = _vae_from_link(g, (node.get('inputs') or {}).get('vae'))
         if named:
@@ -419,8 +493,42 @@ def _lora_display_name(s):
     return os.path.splitext(base)[0]
 
 
+_LORA_PATH_KEYS = ('lora', 'name', 'lora_name')
+_LORA_STRENGTH_KEYS = ('str', 'strength', 'strength_model')
+_LORA_OFF_KEYS = ('on', 'active', 'enabled')
+
+
+def _lora_entries(v, depth=0):
+    """The list of LoRA entry dicts inside one input value, whatever wrapper it arrived in.
+
+    Three wrappers seen so far and the reason this is written as a shape rather than a list of
+    them: a plain list, a dict holding the list under a private key (ComfyUI Lora Manager uses
+    `__value__`), and a list encoded as one JSON string (the LTX stacker). A pack that bundles
+    LoRAs is choosing one of these; it is not inventing a fourth kind of container.
+    """
+    if depth > 2:
+        return []
+    if isinstance(v, list):
+        return [e for e in v if isinstance(e, dict)]
+    if isinstance(v, dict):
+        for k in ('__value__', 'value', 'loras'):
+            if k in v:
+                return _lora_entries(v[k], depth + 1)
+        return []
+    if isinstance(v, str):
+        # Cheap gate before the parse: every graph carries long prompt strings, and JSON-decoding
+        # each of them per node would be real work for nothing.
+        if '"lora"' not in v and not ('"name"' in v and 'strength' in v):
+            return []
+        try:
+            return _lora_entries(json.loads(v), depth + 1)
+        except Exception:
+            return []
+    return []
+
+
 def _lora_stack(inp):
-    """LoRAs from a STACKER: one input holding a JSON *string* of [{on, lora, str}, ...].
+    """LoRAs from a BUNDLE: one input holding several at once, as [{raw, strength}, ...].
 
     The third shape, after the single loader (`lora_name`) and rgthree's Power Lora Loader
     (`lora_1..N` as dicts). Found 2026-09-05 on `LTX_lora_loader` ("LoRA Loader Stack (LTX /
@@ -428,33 +536,29 @@ def _lora_stack(inp):
     in one `stack_data` string -- so every LoRA in a MiniMax video run was invisible, in the viewer
     AND in the sidecar the saver writes, because both ask this module the same question.
 
-    MATCHED BY SHAPE, NOT BY NODE NAME. The class name and the input key are both this pack's
-    choices; the convention -- a JSON list of entries with an `on` flag and a `lora` path -- is the
-    part another pack is likely to copy. Same reasoning as _is_lora_node: the four class names that
-    used to be hardcoded were never the four that exist.
+    MATCHED BY SHAPE, NOT BY NODE NAME. The class name and the input key are both the pack's
+    choices; the convention -- a list of entries each naming a LoRA and a strength -- is the part
+    another pack is likely to copy. Same reasoning as _is_lora_node: the four class names that used
+    to be hardcoded were never the four that exist.
 
-    `on` absent means on: an entry that says nothing about being disabled is not disabled. Strength
-    is `str` here and `strength` in rgthree's, so both are read.
+    Widened 2026-09-17 for ComfyUI Lora Manager's loader, which keeps a REAL list rather than one
+    written out as text, names the file under `name`, and flags each entry `active` instead of
+    `on`. Every one of those is a spelling of something already handled, so all three are now read
+    as alternatives rather than as a new case.
+
+    An entry that says nothing about being disabled is not disabled, so an absent flag means on.
     """
     out = []
     for v in inp.values():
-        # Cheap gate before the parse: every graph carries long prompt strings, and JSON-decoding
-        # each of them per node would be real work for nothing.
-        if not isinstance(v, str) or '"lora"' not in v:
-            continue
-        try:
-            entries = json.loads(v)
-        except Exception:
-            continue
-        if not isinstance(entries, list):
-            continue
-        for e in entries:
-            if not isinstance(e, dict) or not isinstance(e.get('lora'), str):
+        for e in _lora_entries(v):
+            raw = next((e[k] for k in _LORA_PATH_KEYS
+                        if isinstance(e.get(k), str) and e[k]), None)
+            if not raw:
                 continue
-            if not e.get('on', True):
+            if any(k in e and not e[k] for k in _LORA_OFF_KEYS):
                 continue
-            out.append({'raw': e['lora'],
-                        'strength': e.get('str', e.get('strength'))})
+            strength = next((e[k] for k in _LORA_STRENGTH_KEYS if e.get(k) is not None), None)
+            out.append({'raw': raw, 'strength': strength})
     return out
 
 
@@ -1227,7 +1331,10 @@ def extract_video(path):
                   'model': None, 'model_name': None, 'method': None,
                   'set_id': None, 'set_stage': None, 'vae_name': None,
                   'steps': None, 'cfg': None, 'sampler_name': None, 'scheduler': None, 'seed': None}
-    _from_graph(tags['prompt'], from_video)    # sets method='sampler-trace' when it traces one
+    # The file's own name and stage tell the walk which saver wrote THIS clip -- the case that
+    # matters, because a video workflow routinely writes several and they are not the same length.
+    _from_graph(tags['prompt'], from_video,
+                _file_hints(path, stage=res.get('set_stage'), kind='video'))
     filled = False
     for k, v in from_video.items():
         if k == 'method':
@@ -1449,10 +1556,11 @@ def read_exif_a1111(path):
 # a second-class one like a WebM: once the JSON is out of the tag, every walker below reads it
 # exactly as it reads an image's.
 #
-# Only MP3 is read. FLAC and Opus carry the same blobs in Vorbis comments and could be added, but
-# nothing here has been tested against one — so they index and play with no metadata rather than
-# with guessed metadata, and the card says so by simply having nothing to show.
-_AUDIO_META_EXTS = {'.mp3'}
+# MP3 and FLAC are read. OPUS IS STILL NOT: it carries the same two blobs in the same Vorbis
+# comment format, but wrapped in Ogg pages that have to be walked first, and nothing here has been
+# tested against one. An untested format indexes and plays with no metadata rather than with
+# guessed metadata, and the card says so by simply having nothing to show.
+_AUDIO_META_EXTS = {'.mp3', '.flac'}
 # An ID3 tag holding a workflow runs to tens of KB (48KB in testing). This ceiling is generous
 # enough for a large graph and still refuses to read a corrupt header claiming hundreds of MB.
 ID3_MAX_BYTES = 8 * 1024 * 1024
@@ -1553,6 +1661,153 @@ def read_id3_txxx(path):
     except Exception:
         return out
     return out
+
+
+# ---- FLAC: the same two blobs, in the container FLAC actually uses ------------------------------
+# A ComfyUI audio save writes `prompt` and `workflow` whatever the format; only the envelope
+# changes. MP3 gets ID3 TXXX frames, read above. FLAC gets a VORBIS_COMMENT block, read here.
+#
+# WHY THIS WAS MISSING AND WHAT IT COST: the reader only knew ID3, so a FLAC came back with nothing
+# at all -- no prompt, no model, no settings, no tempo or key -- and its Details pane was simply
+# blank. The visible symptom the author reported was different and looked unrelated: the detail
+# view's drag-to-ComfyUI handle showed a BROKEN IMAGE. That handle is a picture built out of the
+# song's own workflow, so no workflow meant no picture, meant a 500, meant a broken box. One cause,
+# two faults, and the one he could see was the further of the two from it.
+#
+# Verified against a real file before a line was written: samples/YUE_FemPhonemes_...flac carries
+# `prompt` at 9,340 chars and `workflow` at 36,653, in a 46KB VORBIS_COMMENT block, and no PICTURE
+# block at all -- which is why that track draws a waveform rather than cover art.
+#
+# THE TWO ENDIANNESSES ARE NOT A TYPO. A FLAC metadata block header is big-endian (it is FLAC's own
+# format), and the Vorbis comment payload inside it is little-endian (it is Vorbis's). Reading
+# either with the other's rule yields garbage lengths that walk off the end of the block.
+_FLAC_MAGIC = b'fLaC'
+_FLAC_VORBIS_COMMENT = 4
+_FLAC_PICTURE = 6
+
+
+def _flac_blocks(path):
+    """Yield (block_type, payload) for each FLAC metadata block. Never raises.
+
+    Reads block by block rather than slurping: the audio itself is megabytes and none of it is
+    wanted, and the metadata all sits at the front of the file before the first audio frame.
+    """
+    try:
+        with open(path, 'rb') as f:
+            if f.read(4) != _FLAC_MAGIC:
+                return
+            while True:
+                head = f.read(4)
+                if len(head) < 4:
+                    return
+                last = head[0] >> 7
+                btype = head[0] & 0x7F
+                size = int.from_bytes(head[1:4], 'big')
+                if size > ID3_MAX_BYTES:        # a corrupt header claiming hundreds of MB
+                    return
+                payload = f.read(size)
+                if len(payload) < size:
+                    return
+                yield btype, payload
+                if last:
+                    return
+    except Exception:
+        return
+
+
+def _parse_vorbis_comments(body):
+    """{key: value} from a Vorbis comment payload. Keys are lowercased: the spec says the field
+    name is case-insensitive and writers disagree in practice -- ffmpeg wrote these ones lowercase,
+    but an uppercase WORKFLOW from another tool has to land in the same place."""
+    out = {}
+    try:
+        p = 0
+        vlen = int.from_bytes(body[p:p + 4], 'little'); p += 4
+        p += vlen                                # the vendor string, which nothing here wants
+        count = int.from_bytes(body[p:p + 4], 'little'); p += 4
+        for _ in range(count):
+            clen = int.from_bytes(body[p:p + 4], 'little'); p += 4
+            if clen > len(body):                 # a length that cannot be real; stop rather than guess
+                break
+            raw = body[p:p + clen]; p += clen
+            key, sep, val = raw.partition(b'=')
+            if not sep:
+                continue
+            out[key.decode('utf-8', 'replace').strip().lower()] = val.decode('utf-8', 'replace')
+    except Exception:
+        return out
+    return out
+
+
+def read_vorbis_comments(path):
+    """{key: value} for a FLAC's VORBIS_COMMENT block. Never raises, {} when there is none."""
+    for btype, payload in _flac_blocks(path):
+        if btype == _FLAC_VORBIS_COMMENT:
+            return _parse_vorbis_comments(payload)
+    return {}
+
+
+def _parse_flac_picture(body):
+    """Raw image bytes out of a FLAC PICTURE block, plus its picture type. All big-endian."""
+    p = 0
+    ptype = int.from_bytes(body[p:p + 4], 'big'); p += 4
+    mlen = int.from_bytes(body[p:p + 4], 'big'); p += 4 + mlen
+    dlen = int.from_bytes(body[p:p + 4], 'big'); p += 4 + dlen
+    p += 16                                      # width, height, depth, colours -- four uint32s
+    ilen = int.from_bytes(body[p:p + 4], 'big'); p += 4
+    return ptype, body[p:p + ilen]
+
+
+def read_flac_cover(path):
+    """Embedded cover art from a FLAC, or None. Never raises.
+
+    TWO PLACES TO LOOK, because writers disagree. The PICTURE metadata block is the native one;
+    METADATA_BLOCK_PICTURE is the same structure base64'd into a comment, which is how a tool that
+    only knows how to write comments smuggles art in. Picture type 3 is the front cover and wins
+    when present, matching read_id3_cover's rule for APIC so both formats answer the same way.
+    """
+    try:
+        first = None
+        comments = None
+        for btype, payload in _flac_blocks(path):
+            if btype == _FLAC_PICTURE:
+                ptype, data = _parse_flac_picture(payload)
+                if data:
+                    if ptype == 3:
+                        return data
+                    if first is None:
+                        first = data
+            elif btype == _FLAC_VORBIS_COMMENT:
+                comments = payload
+        if first is None and comments is not None:
+            b64 = _parse_vorbis_comments(comments).get('metadata_block_picture')
+            if b64:
+                ptype, data = _parse_flac_picture(base64.b64decode(b64))
+                if data:
+                    return data
+        return first
+    except Exception:
+        return None
+
+
+# ---- one question, asked of whichever container this file happens to be -------------------------
+# Everything above this line knows about a format. Everything below it, and every caller, should
+# not: a song's workflow is a song's workflow. These two are the seam, and adding Opus means adding
+# a branch here and nothing else.
+def read_audio_tags(path):
+    """{key: value} of a song's embedded text, whatever container it is in. Never raises."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == '.flac':
+        return read_vorbis_comments(path)
+    return read_id3_txxx(path)
+
+
+def read_audio_cover(path):
+    """A song's embedded cover art as raw bytes, or None, whatever container it is in."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == '.flac':
+        return read_flac_cover(path)
+    return read_id3_cover(path)
 
 
 # The song's own attributes — tempo, key, genre, voice — are NOT fields. They are sentences inside
@@ -1677,21 +1932,39 @@ def _audio_text_nodes(g):
     input every image encoder uses — so the ordinary prompt walker finds nothing here and this
     reads them directly. Picks the longest of each across the graph, which settles a workflow
     holding more than one encoder.
+
+    TWO NAMES FOR THE CAPTION, IN PRIORITY ORDER, not one pool. YuE2's generator nodes call it
+    `style` where the encoder this was written against calls it `caption`, and `style` cannot
+    simply join the pool: it is a common enough input name that an unrelated node carrying a long
+    string would beat a real caption under the longest-wins rule. So `caption` is searched first
+    and `style` only answers when nothing claimed the better name.
+
+    FOUND BY THE FLAC WORK, 2026-09-18, and worth knowing it was never FLAC-specific: this graph
+    also draws its own cover art, so it holds an IMAGE encoder beside the music one. With the
+    caption unfound, the generic walker's longest-prompt fallback stood, and the song's "prompt"
+    came out as the description of the woman on the sleeve. The format only decided whether anyone
+    could see it.
     """
     caption = lyrics = ''
-    for n in g.values():
-        inp = n.get('inputs', {})
-        if not isinstance(inp, dict):
-            continue
-        for key, keep in (('caption', 'caption'), ('lyrics', 'lyrics')):
-            v = inp.get(key)
-            if _is_link(v):
-                v = _resolve_string(g, v)
-            if isinstance(v, str) and len(v.strip()) > len((caption if keep == 'caption' else lyrics)):
-                if keep == 'caption':
-                    caption = v.strip()
-                else:
-                    lyrics = v.strip()
+    for keys, which in ((('caption',), 'caption'), (('style',), 'caption'), (('lyrics',), 'lyrics')):
+        if which == 'caption' and caption:
+            continue                      # a better-named input already answered
+        for n in g.values():
+            inp = n.get('inputs', {})
+            if not isinstance(inp, dict):
+                continue
+            for key in keys:
+                v = inp.get(key)
+                if _is_link(v):
+                    v = _resolve_string(g, v)
+                if not isinstance(v, str):
+                    continue
+                v = v.strip()
+                if which == 'caption':
+                    if len(v) > len(caption):
+                        caption = v
+                elif len(v) > len(lyrics):
+                    lyrics = v
     return caption, lyrics
 
 
@@ -1717,18 +1990,31 @@ def extract_audio(path):
     # rather than inferred later from whether a thumbnail exists: thumbnails are generated LAZILY on
     # first request, so an unvisited song has no thumb yet and would look coverless.
     frames = {}
-    try:
-        for fid, payload in _walk_id3(*_id3_frames(path)):
-            if fid == b'APIC':
+    if os.path.splitext(path)[1].lower() == '.flac':
+        # One pass here too, for the same reason: the comment block and any picture block both sit
+        # at the front of the file, so asking two separate questions would walk it twice.
+        for btype, payload in _flac_blocks(path):
+            if btype == _FLAC_VORBIS_COMMENT:
+                frames = _parse_vorbis_comments(payload)
+                if 'metadata_block_picture' in frames:
+                    res['has_cover'] = 1
+            elif btype == _FLAC_PICTURE:
                 res['has_cover'] = 1
-            elif fid == b'TXXX':
-                enc = payload[0] if payload else 0
-                codec = {0: 'latin-1', 1: 'utf-16', 2: 'utf-16-be', 3: 'utf-8'}.get(enc, 'utf-8')
-                desc, _, val = payload[1:].decode(codec, 'replace').partition('\x00')
-                frames[desc.strip('\x00').strip()] = val.rstrip('\x00')
-    except Exception:
-        pass
-    _from_graph(frames.get('prompt'), res)
+    else:
+        try:
+            for fid, payload in _walk_id3(*_id3_frames(path)):
+                if fid == b'APIC':
+                    res['has_cover'] = 1
+                elif fid == b'TXXX':
+                    enc = payload[0] if payload else 0
+                    codec = {0: 'latin-1', 1: 'utf-16', 2: 'utf-16-be', 3: 'utf-8'}.get(enc, 'utf-8')
+                    desc, _, val = payload[1:].decode(codec, 'replace').partition('\x00')
+                    frames[desc.strip('\x00').strip()] = val.rstrip('\x00')
+        except Exception:
+            pass
+    # kind='audio' keeps the walk on the track's own branch: a song workflow that also draws cover
+    # art holds an image sampler too, and that one is usually the one with the longer prompt.
+    _from_graph(frames.get('prompt'), res, _file_hints(path, kind='audio'))
     try:
         g = json.loads(frames.get('prompt') or 'null')
         g = {k: v for k, v in g.items() if isinstance(v, dict)} if isinstance(g, dict) else {}
@@ -1775,7 +2061,8 @@ def extract(path):
     # the graph path can bail at any of its four dead ends WITHOUT skipping the fallback — which is
     # what the old `return res` early-outs did, and why a PNG with no readable graph reported
     # nothing even when the answer was sitting in its `parameters` chunk.
-    _from_graph(chunks.get('prompt'), res)
+    hints = _file_hints(path, chunks)
+    _from_graph(chunks.get('prompt'), res, hints)
     # THE SAME GRAPH, KEPT SOMEWHERE ELSE. A JPEG or WebP has no PNG chunks at all, so the line
     # above found nothing and the file read as "no metadata" however complete it was — every WebP
     # ComfyUI has ever written, including the animated ones every video workflow produces.
@@ -1783,7 +2070,7 @@ def extract(path):
     # that can carry both has one obvious winner. `_from_graph` fills only what is still None, so
     # this cannot overwrite anything already read.
     if not (res['positive'] or res['model']):
-        _from_graph(read_exif_comfy(path), res)
+        _from_graph(read_exif_comfy(path), res, hints)
     # AFTER the graph, so a traced model still wins; the A1111 block only fills what was left empty.
     # The PNG chunk is tried first and EXIF only when it is absent — a PNG is never read twice, and
     # the file is only opened for a format that could carry EXIF at all.
@@ -1791,9 +2078,14 @@ def extract(path):
     return res
 
 
-def _from_graph(pj, res):
+def _from_graph(pj, res, hints=None):
     """Populate `res` from ComfyUI's `prompt` chunk. Returns nothing; a dead end just leaves the
-    fields it couldn't fill alone."""
+    fields it couldn't fill alone.
+
+    `hints` is what the FILE says about itself (see `_file_hints`), used to work out which node in
+    the graph saved THIS file when several saved something. Optional, and everything still works
+    without it -- a caller that has no path to offer just gets the older rules.
+    """
     if not pj:
         return
     try:
@@ -1806,32 +2098,47 @@ def _from_graph(pj, res):
     # crash the walkers below (one bad file must never abort a whole scan).
     g = {k: v for k, v in g.items() if isinstance(v, dict)}
     res['loras'] = _extract_loras(g)
-    vae = _resolve_vae(g)
+
+    # WHICH SAMPLER MADE THIS FILE. Asked once, answered by walking back from the node that saved
+    # it, and used for the prompt, the model and the VAE alike -- so the row the library shows and
+    # the file Export for Civitai writes can no longer describe the same picture differently.
+    chain = resolve_output_chain(g, hints)
+
+    vae = _resolve_vae(g, [chain['vae_decode']] if chain['vae_decode'] else ())
     if vae:
         res['vae_name'] = _vae_display_name(vae)
 
-    samplers = [nid for nid, n in g.items() if _is_sampler_node(n)]
-    best = None
-    for sid in samplers:
-        inp = g[sid]['inputs']
-        pos = inp.get('positive')
+    def _read_sampler(sid):
+        pos, neg = _sampler_conditioning(g, sid)
         ptxt = _follow_to_text(g, pos) if _is_link(pos) else (pos if isinstance(pos, str) else '')
-        neg = inp.get('negative')
         ntxt = _follow_to_text(g, neg) if _is_link(neg) else (neg if isinstance(neg, str) else '')
-        model = _resolve_model(g, sid)
-        cand = {'positive': ptxt, 'negative': ntxt, 'model': model}
-        if best is None or len(ptxt or '') > len(best['positive'] or ''):
-            best = cand
+        return {'positive': ptxt, 'negative': ntxt, 'model': _resolve_model(g, sid)}
+
+    best, how = None, None
+    if chain['sampler'] and chain['sampler'] in g:
+        best, how = _read_sampler(chain['sampler']), chain['method']
+    if best is None or not (best['positive'] or best['model']):
+        # The walk had no answer, or reached a sampler that states nothing. Fall back to the old
+        # rule rather than report less than before: no file is ever worse off for this change.
+        fallback = None
+        for sid in [nid for nid, n in g.items() if _is_sampler_node(n)]:
+            cand = _read_sampler(sid)
+            if fallback is None or len(cand['positive'] or '') > len(fallback['positive'] or ''):
+                fallback = cand
+        if fallback is not None:
+            best, how = fallback, 'sampler-trace'
     if best:
         res.update(positive=best['positive'] or None,
                    negative=best['negative'] or None,
                    model=best['model'])
-        res['method'] = 'sampler-trace'
+        res['method'] = how
 
-    # Generation settings come from the BASE sampler, which is a different question from which
-    # sampler owns the prompt above (that one is picked by longest positive). Deliberately separate:
-    # the prompt rule wants the sampler carrying the real instruction, this one wants the sampler
-    # that made the original image.
+    # Generation settings STILL come from the BASE sampler, deliberately, even though the walk above
+    # now knows which sampler made this particular file. Changing this moves the steps and CFG shown
+    # on files the author has already looked at, and it is his call to make on its own -- parked
+    # 2026-09-17 with the rest of the walk shipped. `Face__00001.mp4` is the known-wrong example:
+    # it reports 8 steps / CFG 0.9 from another clip in the same workflow, where its own branch ran
+    # 4 steps / CFG 1.0.
     base = _pick_base_sampler(g)
     if base is not None:
         for k, v in extract_gen_params(g, base).items():
@@ -1953,6 +2260,324 @@ def _resolve_combo(g, ref, seen=None, depth=0):
     return None
 
 
+# ---------------------------------------------------------------------------------------------
+# WALKING BACK FROM THE SAVER.
+#
+# Everything below exists to replace a guess. The old question was "which sampler in this graph has
+# the longest positive prompt", which is not a fact about workflows at all -- it is a popularity
+# contest on character count, and it picked the cover art's sampler for a song, and an upscale
+# pass's for a picture whose prompt merely gained a few quality tags.
+#
+# The file carries the node that SAVED it. Walking backwards from there -- saver, decoder, sampler,
+# model -- answers the question rather than guessing at it, and it is true of every workflow anyone
+# will ever build. This REMOVES a rule instead of adding one, which is the opposite shape from the
+# name lists elsewhere in this file, each of which has had to grow every time a new pack appeared.
+#
+# It answers the prompt, the model and the VAE. Generation settings deliberately still come from
+# `_pick_base_sampler` -- see the note there.
+# ---------------------------------------------------------------------------------------------
+
+# How likely an input is to carry THE PICTURE backwards. Lower wins; a hop costs 1 on top.
+#
+# THIS IS A LIST, and it is worth being honest about that. The difference from the class-name lists
+# is what it is a list OF: ComfyUI's socket names for its own payload types, which every pack
+# inherits by using those types, rather than the names individual packs chose for themselves.
+# Anything unrecognised stays reachable at _RANK_OTHER, so an omission costs a slower walk and not
+# a wrong answer.
+_RANK_PAYLOAD = 0        # carries the picture/sound itself
+_RANK_RELAY = 2          # might carry it: switches, reroutes, rgthree's Context
+_RANK_OTHER = 8          # unknown, but not obviously off-branch
+_RANK_OFF_BRANCH = 40    # the model/conditioning side
+
+_PAYLOAD_KEYS = frozenset((
+    'samples', 'latent', 'latent_image', 'images', 'image', 'img',
+    'audio', 'audio_in', 'video', 'pixels', 'frames', 'video_frames',
+))
+# Type-agnostic relays. `on_true`/`on_false` are a real switch node in the author's music workflow;
+# `base_ctx` is rgthree's Context, which is the node that makes a naive walk go wrong -- it carries
+# the model AND the picture, so the ranking is what sends the walk down the picture.
+_RELAY_KEYS = frozenset((
+    'on_true', 'on_false', 'input', 'value', 'source', 'default', 'any',
+    'base_ctx', 'ctx', 'context', 'a', 'b',
+))
+_OFF_BRANCH_KEYS = frozenset((
+    'model', 'clip', 'vae', 'audio_vae', 'clip_vision', 'style_model',
+    'positive', 'negative', 'conditioning', 'guider', 'sampler', 'sigmas',
+    'noise', 'control_net', 'mask', 'first_frame', 'start_image', 'end_image',
+))
+_RELAY_PREFIXES = ('any_', 'input_', 'input', 'any')
+
+
+def _key_rank(k):
+    """How eagerly the walk should follow an input named `k`."""
+    low = (k or '').lower()
+    if low in _PAYLOAD_KEYS:
+        return _RANK_PAYLOAD
+    if low in _OFF_BRANCH_KEYS:
+        return _RANK_OFF_BRANCH
+    if low in _RELAY_KEYS:
+        return _RANK_RELAY
+    # rgthree's Any Switch numbers its inputs any_01..any_NN; other packs use input1..N.
+    for p in _RELAY_PREFIXES:
+        if low.startswith(p) and low[len(p):].isdigit():
+            return _RANK_RELAY
+    return _RANK_OTHER
+
+
+def _walk_back_to_sampler(g, start_id, max_expansions=512, max_cost=400):
+    """The sampler that produced what `start_id` consumed, walking BACK along its inputs.
+
+    Best-first rather than depth-first, picture-carrying branches before the model side. That
+    ordering is the whole correctness argument: an rgthree Context node hands on the model and the
+    latent together, so a plain depth-first walk can arrive at a different stage's sampler and be
+    entirely confident about it.
+
+    Returns (sampler_id, path); path is the ids from the first hop through to the sampler, which is
+    what lets the caller find the decoder that made THIS picture. (None, []) when nothing is
+    reachable inside the budget -- a cycle, a dead end, or a graph shape we don't model.
+    """
+    start = str(start_id)
+    frontier = [(0, 0, start)]
+    parents, visited, seq = {}, {start}, 0
+    expansions = 0
+    while frontier and expansions < max_expansions:
+        cost, _, nid = heapq.heappop(frontier)
+        if cost > max_cost:
+            break
+        expansions += 1
+        node = g.get(nid)
+        if not node:
+            continue
+        if nid != start and _is_sampler_node(node):
+            path, cur = [], nid
+            while cur in parents:
+                path.append(cur)
+                cur = parents[cur]
+            return nid, list(reversed(path))
+        inp = node.get('inputs') or {}
+        # Sorted so the answer depends on the graph and not on JSON key order.
+        for k, v in sorted(inp.items(), key=lambda kv: (_key_rank(kv[0]), str(kv[0]))):
+            if not _is_link(v):
+                continue
+            src = str(v[0])
+            if src in visited:
+                continue
+            visited.add(src)             # seeded with the start, so a cycle just exhausts the heap
+            parents[src] = nid
+            seq += 1
+            heapq.heappush(frontier, (cost + _key_rank(k) + 1, seq, src))
+    return None, []
+
+
+def _link_sources(g):
+    """Every node id that some other node reads an output from."""
+    out = set()
+    for n in g.values():
+        for v in (n.get('inputs') or {}).values():
+            if _is_link(v):
+                out.add(str(v[0]))
+    return out
+
+
+# A node that WRITES A FILE is the end of a branch: it eats a picture and hands nothing on. That is
+# its whole shape, and every writer in every pack has it -- which is why this is not another list of
+# class names. The same reasoning `_is_sampler_node` and `_loader_filename` already record: the four
+# names anyone would hardcode were never the four that exist.
+def _saver_nodes(g):
+    """[(nid, node), ...] for every node that ends a branch by consuming a payload."""
+    consumed = _link_sources(g)
+    out = []
+    for nid, n in g.items():
+        nid = str(nid)
+        ct = (n.get('class_type') or '').lower()
+        inp = n.get('inputs') or {}
+        eats = any(_is_link(v) and _key_rank(k) <= _RANK_RELAY for k, v in inp.items())
+        if not eats:
+            continue
+        # A sampler with nothing reading it is a dangling branch, not an output node.
+        if _is_sampler_node(n):
+            continue
+        # Normally an output is a sink. The exception is a saver that passes its images through for
+        # someone to preview, so a class that says what it does is admitted either way.
+        says_so = ('save' in ct or 'write' in ct or 'export' in ct)
+        if nid in consumed and not says_so:
+            continue
+        out.append((nid, n))
+    return sorted(out, key=lambda t: (len(t[0]), t[0]))
+
+
+# Keys that name a FILE. Resolving a filename down a wire is necessary -- the author's video saver
+# is fed its prefix by a naming node -- but resolving every input would walk into the prompt, and a
+# prompt is exactly the kind of long string that would then "match" a filename by accident.
+_FILENAME_KEYS = ('filename_prefix', 'filename', 'file', 'path', 'output_path',
+                  'base_name', 'basename', 'name', 'prefix')
+
+
+def _node_literals(node):
+    """The strings a node carries OUTRIGHT. Used where a wired-in value would be misleading: a
+    preview node has no literal of its own, which is what tells it apart from a saver."""
+    return [v for v in (node.get('inputs') or {}).values()
+            if isinstance(v, str) and v.strip()]
+
+
+def _node_filenames(g, node):
+    """What this node says its file is called, literal or arriving down a wire."""
+    out = []
+    for k, v in (node.get('inputs') or {}).items():
+        if k.lower() not in _FILENAME_KEYS:
+            continue
+        if isinstance(v, str):
+            if v.strip():
+                out.append(v)
+        elif _is_link(v):
+            try:
+                sres = _resolve_string(g, v)
+            except Exception:
+                sres = ''
+            if isinstance(sres, str) and sres.strip():
+                out.append(sres)
+    return out
+
+
+# What KIND of file this is, for matching a file against what a saver eats. Deliberately wider than
+# the sets that decide which files we can READ metadata out of: a FLAC's metadata is unreadable
+# today, but a FLAC is still unmistakably audio, and that is all this answers.
+_KIND_AUDIO_EXTS = {'.mp3', '.flac', '.wav', '.opus', '.m4a', '.ogg', '.aac'}
+_KIND_VIDEO_EXTS = {'.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi', '.gif'}
+
+
+def _file_hints(path=None, chunks=None, stage=None, kind=None):
+    """What the FILE says about which node wrote it: {'stem', 'stage', 'kind'}."""
+    stem = None
+    if path:
+        stem = os.path.splitext(os.path.basename(path))[0]
+    if kind is None and path:
+        ext = os.path.splitext(path)[1].lower()
+        kind = ('audio' if ext in _KIND_AUDIO_EXTS else
+                'video' if ext in _KIND_VIDEO_EXTS else 'image')
+    if stage is None and chunks:
+        stage = (chunks.get('vv_set_stage') or '').strip() or None
+    return {'stem': stem, 'stage': (stage or None), 'kind': kind}
+
+
+def _saver_kind(node):
+    """image / audio / video / None, from which payload inputs a saver actually eats."""
+    keys = {k.lower() for k, v in (node.get('inputs') or {}).items() if _is_link(v)}
+    has_img = bool(keys & {'images', 'image', 'img', 'frames', 'video_frames'})
+    has_audio = bool(keys & {'audio', 'audio_in'})
+    if 'video' in keys or (has_img and has_audio) or 'frames' in keys:
+        return 'video'
+    if has_audio:
+        return 'audio'
+    if has_img:
+        return 'image'
+    return None
+
+
+def _pick_saver(g, hints=None, saver_id=None):
+    """(nid, why) for the node that wrote THIS file. `why` says which evidence decided it.
+
+    Each rule NARROWS the candidates and is skipped whenever it would leave none, so no single
+    signal can disqualify the right answer on its own. In particular a filename prefix is positive
+    evidence only: the author's own saver carries a stale literal `filename_prefix` of "ComfyUI"
+    from before that widget was removed, and treating a mismatch as a veto would reject it.
+    """
+    cands = _saver_nodes(g)
+    if not cands:
+        return None, None
+    if saver_id is not None and str(saver_id) in {nid for nid, _ in cands}:
+        return str(saver_id), 'unique-id'
+    hints = hints or {}
+    if len(cands) == 1:
+        return cands[0][0], 'only'
+
+    # Strongest: the file's name begins with something the node says.
+    stem = (hints.get('stem') or '').lower()
+    if stem:
+        best, best_len = None, 0
+        for nid, n in cands:
+            for fn in _node_filenames(g, n):
+                tail = fn.replace('\\', '/').split('/')[-1].lower()
+                if len(tail) >= 3 and stem.startswith(tail) and len(tail) > best_len:
+                    best, best_len = nid, len(tail)
+        if best:
+            return best, 'prefix'
+
+    # The stage this file was saved as, matched against ANY string the node carries. Not a named
+    # key: the author's saver holds the literal "Custom..." under `stage` and the real answer under
+    # `stage_custom`, so asking one field by name would read the wrong one.
+    stage = (hints.get('stage') or '').strip().lower()
+    if stage:
+        hit = [nid for nid, n in cands
+               if any(v.strip().lower() == stage for v in _node_literals(n))]
+        if len(hit) == 1:
+            return hit[0], 'stage'
+        if hit:
+            cands = [(nid, n) for nid, n in cands if nid in set(hit)]
+
+    # What kind of file this is, against what the node eats.
+    kind = hints.get('kind')
+    if kind:
+        hit = [(nid, n) for nid, n in cands if _saver_kind(n) == kind]
+        if len(hit) == 1:
+            return hit[0][0], 'kind'
+        if hit:
+            cands = hit
+
+    # Last: it has to write a file, so it has to have been told what to call it. A preview has not.
+    named = [(nid, n) for nid, n in cands if _node_filenames(g, n) or _node_literals(n)]
+    if len(named) == 1:
+        return named[0][0], 'writes'
+    return None, None
+
+
+def resolve_output_chain(g, hints=None, saver_id=None):
+    """Which sampler made THIS file, found by walking back from the node that saved it.
+
+    The one answer the module now uses for the prompt, the model and the VAE, so the indexed row and
+    Export for Civitai can no longer disagree about the same picture. Everything it cannot answer
+    falls through to the older rules untouched -- no file is ever worse off than before.
+
+    Returns {'saver', 'sampler', 'path', 'vae_decode', 'method', 'why'}; any value may be None.
+    """
+    blank = {'saver': None, 'sampler': None, 'path': [], 'vae_decode': None,
+             'method': None, 'why': None}
+    cands = _saver_nodes(g)
+    if not cands:
+        return blank
+    hints = hints or {}
+    sid, why = _pick_saver(g, hints, saver_id)
+    sampler, path = (None, [])
+    if sid:
+        sampler, path = _walk_back_to_sampler(g, sid)
+    if sampler:
+        out = dict(blank, saver=sid, sampler=sampler, path=path,
+                   method='saver-walk', why=why)
+    else:
+        # Either nothing told the candidates apart, or the one we matched walks to no sampler at all
+        # (a saver writing a loaded first frame, which is correct and must not veto). If every
+        # candidate agrees, the answer is unambiguous however we got there.
+        answers = {}
+        for nid, _n in cands:
+            s, p = _walk_back_to_sampler(g, nid)
+            if s:
+                answers[s] = p
+        if len(answers) != 1:
+            return blank
+        s, p = next(iter(answers.items()))
+        out = dict(blank, saver=sid, sampler=s, path=p,
+                   method='saver-walk-agreed', why='agreed')
+    # The decoder that made this picture, taken off the walk's own path rather than searched for by
+    # class name -- which is how "CR VAE Decode" and "Vae Decode (mtb)" have been missed until now.
+    want_audio = (hints.get('kind') == 'audio')
+    for nid in out['path']:
+        low = (g.get(nid, {}).get('class_type') or '').lower().replace(' ', '').replace('_', '')
+        if 'vaedecode' in low and (want_audio or 'audio' not in low):
+            out['vae_decode'] = nid
+            break
+    return out
+
+
 def _pick_base_sampler(g):
     """The BASE sampler: the one that made the original image, before any detailer or upscaler.
 
@@ -2007,8 +2632,17 @@ def _pick_base_sampler(g):
     return sorted(bases, key=lambda n: (len(str(n)), str(n)))[0]
 
 
-def _pick_sampler(g):
-    """The sampler node driving the final image — same rule extract() uses (longest positive)."""
+def _pick_sampler(g, hints=None, saver_id=None):
+    """The sampler node driving the final image — the same answer extract() uses.
+
+    THIS IS WHERE THE EXPORT AND THE LIBRARY USED TO DISAGREE. `list_resources` and `_extract_all`
+    both come through here, so while this guessed by longest positive and `_from_graph` guessed
+    separately, one picture could be indexed with one sampler's model and exported with another's.
+    Both now ask the saver walk first and fall back to the same old rule when it has no answer.
+    """
+    chain = resolve_output_chain(g, hints, saver_id)
+    if chain['sampler'] and chain['sampler'] in g:
+        return chain['sampler']
     best_id, best_len = None, -1
     for nid, n in g.items():
         if _is_sampler_node(n):
@@ -2160,7 +2794,7 @@ def list_resources(path):
         return []
     g = {k: v for k, v in g.items() if isinstance(v, dict)}
     out = []
-    sid = _pick_sampler(g)
+    sid = _pick_sampler(g, _file_hints(path, chunks))
     ckpt = (_resolve_model(g, sid) if sid else None) or _first_loader_ckpt(g)
     if ckpt:
         out.append(('checkpoints', ckpt))
@@ -2187,8 +2821,13 @@ def _extract_all(path):
     g = {k: v for k, v in g.items() if isinstance(v, dict)}
     if not (meta.get('positive') or meta.get('model_name')):
         return None                             # nothing worth exporting
-    sid = _pick_sampler(g)
-    params = extract_gen_params(g, sid) if sid else {}
+    # TWO IDS ON PURPOSE, and only until the settings question is answered. The model comes from the
+    # saver walk, so an exported file names the checkpoint that actually made it. The SETTINGS keep
+    # whatever rule they had, because moving those is a separate decision the author has parked --
+    # and an export that suddenly disagreed with the row beside it would be the worst of both.
+    sid = _pick_sampler(g, _file_hints(path, chunks))
+    sid_params = _pick_sampler(g)
+    params = extract_gen_params(g, sid_params) if sid_params else {}
     raw_ckpt = (_resolve_model(g, sid) if sid else None) or _first_loader_ckpt(g)
     raw_loras = _extract_loras_raw(g)
     return meta, params, raw_ckpt, raw_loras

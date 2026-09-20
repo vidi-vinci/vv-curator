@@ -1,7 +1,7 @@
 'use strict';
 
 const $ = (s) => document.querySelector(s);
-const state = { terms: [], xterms: [], model: '', folder: '', modelFolder: '', meta: '', type: '', group: true, sets: true, tags: [], favOnly: false,
+const state = { terms: [], xterms: [], model: '', folder: '', modelFolder: '', meta: '', type: '', aspect: '', group: true, sets: true, tags: [], favOnly: false,
                 hasNote: false,
                 // Selected root keys for show/hide ([] = all roots). SCOPE, NOT A FILTER: Reset
                 // never clears it and a snapshot never carries it — it is which libraries you are
@@ -548,7 +548,7 @@ function clearXTerms() {
 function serializeFilters() {
   return {
     terms: state.terms, xterms: state.xterms, model: state.model, folder: state.folder, modelFolder: state.modelFolder,
-    meta: state.meta, type: state.type, group: state.group, sets: state.sets, tags: state.tags, favOnly: state.favOnly,
+    meta: state.meta, type: state.type, aspect: state.aspect, group: state.group, sets: state.sets, tags: state.tags, favOnly: state.favOnly,
     hasNote: state.hasNote,
     rmin: state.rmin, rmax: state.rmax,
     dfrom: state.dfrom, dto: state.dto,
@@ -582,6 +582,11 @@ function normalizeFilters(f) {
   o.xterms = Array.isArray(f.xterms) ? f.xterms.slice() : [];
   o.model = f.model || ''; o.folder = f.folder || ''; o.modelFolder = f.modelFolder || ''; o.meta = f.meta || '';
   o.type = f.type || '';
+  // Every snapshot saved before aspect existed has no `aspect` key, and the `|| ''` is what stops
+  // those normalising to undefined -- which would then reach the URL as the literal string
+  // "undefined" and be silently ignored by a server that only recognises three values. An unknown
+  // value is inert by construction at the other end too, so there is no list here to keep in step.
+  o.aspect = f.aspect || '';
   o.group = (f.group === undefined ? true : !!f.group);   // merge still+video pairs, default on
   o.sets = (f.sets === undefined ? true : !!f.sets);      // merge image sets (MAIN/DET/REFINE), default on
   o.tags = Array.isArray(f.tags) ? f.tags.slice() : [];
@@ -610,7 +615,7 @@ function applyFilters(f) {
   const n = normalizeFilters(f);
   state.terms = n.terms; state.xterms = n.xterms;
   state.model = n.model; state.folder = n.folder; state.modelFolder = n.modelFolder; state.meta = n.meta;
-  state.type = n.type; state.group = n.group; state.sets = n.sets;
+  state.type = n.type; state.aspect = n.aspect; state.group = n.group; state.sets = n.sets;
   state.tags = n.tags;
   state.favOnly = n.favOnly;
   state.hasNote = n.hasNote;
@@ -623,6 +628,7 @@ function applyFilters(f) {
   renderFacetDD('model'); renderFacetDD('folder');
   $('#sort').value = sortSelectValue();   // normalizeFilters already guaranteed the option exists
   renderMediaType();
+  renderAspect();
   if ($('#hasNote')) $('#hasNote').checked = state.hasNote;
   if ($('#mfolder')) $('#mfolder').value = state.modelFolder;   // options refill on loadFacets
   renderSetsMode();
@@ -653,6 +659,21 @@ function renderMediaType() {
   // paints .active, so the two can never disagree; deliberately not inferred from :first-child,
   // which is true today and would break silently if a segment were ever reordered.
   $('#mediaType').classList.toggle('at-default', !state.type);
+}
+// Aspect. The same idiom as renderMediaType above and deliberately a separate function rather than a
+// parameterised one: the two bars look alike and are NOT alike -- File type carries the segConflict
+// dimming (some of its pairs are empty by construction), and aspect has no conflicts at all,
+// because every combination of aspect and file type can hold results. Folding them together would mean
+// giving this bar a conflict lookup that always answers no, which is how a rule nobody needs
+// becomes a rule nobody can remove.
+function renderAspect() {
+  document.querySelectorAll('#aspect button').forEach(b => {
+    const on = (b.dataset.aspect || '') === state.aspect;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  // Same "a bar at its default is filtering nothing" rule the two bars beside it follow.
+  $('#aspect').classList.toggle('at-default', !state.aspect);
 }
 // The "Sets" dropdown maps to the two independent collapse flags: state.group (video sets =
 // still+video pairs) and state.sets (image sets). One control, four combinations.
@@ -808,6 +829,10 @@ async function resetFilters() {
   return Busy.during('rail', async () => {
     clearLoadedSnapshot();  // Reset means "start clean"; a snapshot name over zero filters would
     applyFilters(null);     // leave the update button poised to blank that snapshot.
+    // BACK TO THE FILTERS TAB, because Reset means start over and starting over happens there.
+    // Left on Tags or Labels you are looking at a list with nothing ticked in it, which says the
+    // same thing as an empty Filters tab but from the wrong end of the sidebar. His call, 2026-09-18.
+    setActiveTab('filters');
     // In PARALLEL, not one after another: all three are behind the same dim, they write disjoint
     // parts of the page (facets → the two dropdowns + model type + the Libraries list; tags → the
     // tag/label lists; search → the grid and the count), and the server handles a request per
@@ -1058,7 +1083,7 @@ async function loadFacets() {
   // is in Help under Known gaps and is not what this line fixes.
   const p = new URLSearchParams({
     q: queryString(), model: state.model, folder: state.folder, mfolder: state.modelFolder,
-    meta: state.meta, type: state.type, group: state.group ? '1' : '',
+    meta: state.meta, type: state.type, aspect: state.aspect, group: state.group ? '1' : '',
     tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '', x: excludeString(),
     roots: rootsParam(), rmin: state.rmin, rmax: state.rmax,
     after: dateAfter(), before: dateBefore(),
@@ -1377,7 +1402,15 @@ function openLibMenu(key, btn) {
 const labelBySlug = s => (state.labels || []).find(l => l.slug === s) || null;
 const labelByKey = k => (state.labels || []).find(l => l.key === k) || null;
 function labelName(slug) { const l = labelBySlug(slug); return l ? l.name : slug; }
-function labelCount(slug) { const t = (state._tags || []).find(x => x.name === 'label:' + slug); return t ? t.count : 0; }
+// null until the counts have been fetched at all -- NOT 0. The two are indistinguishable once
+// rendered, and since the counts became lazy the Labels tab draws before anything has been asked
+// for: every label read "0" for a moment and then jumped to its real number, which is a wrong
+// number on screen rather than an old one. A label with no count yet simply shows none.
+function labelCount(slug) {
+  if (!_tagsEverLoaded) return null;
+  const t = (state._tags || []).find(x => x.name === 'label:' + slug);
+  return t ? t.count : 0;
+}
 // The single active label filter (a `label:<slug>` entry in state.tags), or null.
 function activeLabel() { const t = (state.tags || []).find(x => x.startsWith('label:')); return t ? t.slice(6) : null; }
 
@@ -1413,7 +1446,7 @@ function renderLabelList() {
     `<div class="label-row${l.slug === act ? ' active' : ''}" data-label="${esc(l.slug)}" title="Filter to ${esc(l.name)}">` +
     `<span class="lsw label-${esc(l.slug)}"></span>` +
     `<span class="lname">${esc(l.name)}</span>` +
-    `<span class="lcount">${labelCount(l.slug).toLocaleString()}</span>` +
+    `<span class="lcount">${labelCount(l.slug) == null ? '' : labelCount(l.slug).toLocaleString()}</span>` +
     `<span class="lkey">${esc(l.key)}</span></div>`).join('');
   // NO "Unreviewed" ROW. It was retired on 2026-08-19 — see filterByLabel below.
   box.innerHTML = rows;
@@ -1440,6 +1473,114 @@ function labelDetail(slug) {
 }
 
 // ---- tags (sidebar list + filtering) ----
+// THE TAG AND LABEL COUNTS ARE FETCHED WHEN SOMETHING NEEDS THEM, not on every filter change.
+//
+// They feed three places and two of them sit behind a tab: the Tags list, the Labels counts, and
+// the tag editor's autocomplete. Re-asking on every filter change meant paying for all three while
+// you were looking at none of them -- measured on the author's library at 3.0-3.7s per filter
+// change before the query was fixed, and still hundreds of milliseconds after. The cheapest query
+// is the one nobody runs.
+//
+// It cannot key off the tab alone: the tag editor opens from the grid and the detail view, and it
+// needs the list of names to offer. So a filter change marks the numbers STALE, and whoever needs
+// them next asks -- switching to Tags or Labels, or opening the editor. A tag or label you WRITE
+// still refreshes at once, because you are looking straight at the number you changed.
+
+// The filter state these counts were fetched under. Comparing it is what stops a "filter changed"
+// that changed nothing relevant from re-asking -- at boot the tab restore and the first refresh
+// both want them, and with a plain flag that was two identical requests for the same numbers.
+function tagsKey() {
+  return new URLSearchParams({
+    q: queryString(), x: excludeString(), model: state.model, folder: state.folder,
+    mfolder: state.modelFolder, meta: state.meta, type: state.type, aspect: state.aspect,
+    group: state.group ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(),
+    rmin: state.rmin, rmax: state.rmax, after: dateAfter(), before: dateBefore(),
+    // SENT, and they were not before. The server needs them to tell the three lists apart: the tag
+    // counts are blind to your tag ticks, the label counts to your label pick, and favourites to
+    // itself -- but each still narrows the OTHER two. Leaving them out is what made picking a label
+    // stop filtering the tags. Being in the key is the other half: ticking a tag now changes what
+    // the numbers describe, so it has to count as the counts going stale.
+    tags: (state.tags || []).join(','), fav: state.favOnly ? '1' : '',
+  }).toString();
+}
+// THE LAST FEW ANSWERS, KEPT. Going back to a filter you just had is the common move -- tick a tag,
+// look, untick it -- and re-asking the server for numbers it just gave is the one wait that is
+// entirely avoidable. Small and bounded: these are counts, not pictures, and the ceiling is what
+// stops a long session's worth of filter states sitting in memory for nothing.
+//
+// NOT a durable cache. It lives for the page, and anything that CHANGES the tags themselves clears
+// it outright -- tagging a selection, deleting a tag everywhere, a scan finding new files. A stale
+// count is worse than a slow one, because it looks like an answer.
+const TAG_CACHE_MAX = 8;
+const _tagCache = new Map();           // key (the filter string) -> {tags, favorites}
+
+function tagCacheClear() { _tagCache.clear(); }
+
+function tagCacheGet(key) {
+  const hit = _tagCache.get(key);
+  if (!hit) return null;
+  _tagCache.delete(key); _tagCache.set(key, hit);   // re-inserted, so the oldest falls off first
+  return hit;
+}
+
+function tagCachePut(key, value) {
+  _tagCache.delete(key);
+  _tagCache.set(key, value);
+  while (_tagCache.size > TAG_CACHE_MAX) _tagCache.delete(_tagCache.keys().next().value);
+}
+
+let _tagsKey = null;                   // what the numbers on screen describe
+let _tagsStale = true;                 // nothing fetched yet
+let _tagsEverLoaded = false;           // distinguishes "no count yet" from "a count of zero"
+let _tagsInFlight = null;
+
+// Shown only if the wait outlasts the app's usual pause before admitting to any work -- the same
+// rule and the same delay as the grid's. A refresh that answers quickly shows nothing at all, and
+// the numbers already on screen stay put meanwhile rather than blanking: they are the previous
+// answer, not a wrong one, and a skeleton would be a second vocabulary for "updating".
+function markTagsBusy(on) {
+  const t = $('#taglist'), l = $('#labelList');
+  clearTimeout(markTagsBusy._t);
+  if (!on) {
+    if (t) t.classList.remove('stale');
+    if (l) l.classList.remove('stale');
+    return;
+  }
+  markTagsBusy._t = setTimeout(() => {
+    if (t) t.classList.add('stale');
+    if (l) l.classList.add('stale');
+  }, PANE_BUSY_DELAY_MS);
+}
+
+// Fetch only if what is on screen is out of date. Concurrent callers share one request.
+function tagsNeeded() {
+  if (!_tagsStale && tagsKey() === _tagsKey) return Promise.resolve();
+  if (_tagsInFlight) return _tagsInFlight;
+  // A filter you had a moment ago. No request, no scrim, no wait -- which is the whole point of
+  // keeping the last few: tick a tag, look, untick it is the commonest move in this pane.
+  const key = tagsKey();
+  const hit = tagCacheGet(key);
+  if (hit) { applyTags(key, hit); return Promise.resolve(); }
+  // Busy.during, so a failed request cannot strand the scrim -- the rule the whole module exists
+  // for. The dimmed counts stay as the quiet half of the same state: the scrim says the pane is
+  // working, the dim says these particular numbers are the old ones.
+  markTagsBusy(true);
+  _tagsInFlight = Busy.during('tab', () => _fetchTags()).finally(() => {
+    _tagsInFlight = null;
+    markTagsBusy(false);
+  });
+  return _tagsInFlight;
+}
+
+// A filter changed, so the numbers no longer describe what you would get. If you are looking at
+// them, they are refreshed now; if you are not, the next person to look pays for it.
+function tagsWentStale() {
+  if (_tagsEverLoaded && tagsKey() === _tagsKey) return;   // nothing the counts depend on moved
+  _tagsStale = true;
+  const sb = $('#sidebar');
+  if (sb && (sb.classList.contains('tab-tags') || sb.classList.contains('tab-labels'))) tagsNeeded();
+}
+
 async function loadTags() {
   // THE SAME NARROWING THE GRID GETS. It used to send `roots` and nothing else, so every label,
   // tag and favourite count was a whole-library total: the rail read "To publish 10" beside a grid
@@ -1450,13 +1591,33 @@ async function loadTags() {
   // Sent even when empty, unlike the old roots-only URL: an absent parameter and an empty one mean
   // the same thing to the server, and building the string the same way every time is what stops
   // the next filter being forgotten here the way `type` was forgotten in loadFacets.
-  const p = new URLSearchParams({
-    q: queryString(), x: excludeString(), model: state.model, folder: state.folder,
-    mfolder: state.modelFolder, meta: state.meta, type: state.type,
-    group: state.group ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(),
-    rmin: state.rmin, rmax: state.rmax, after: dateAfter(), before: dateBefore(),
-  });
-  const data = await getJSON('/api/tags?' + p.toString());
+  // ONE RULE ABOUT THE CACHE, AND IT LIVES HERE. Every caller that TAGGED something -- tagged a
+  // selection, deleted a tag everywhere, set a label, ran the tagger -- calls loadTags() directly,
+  // because it knows the numbers just changed. So a direct call means "something changed": it
+  // throws away every cached answer, not just this filter's, since tagging one picture changes the
+  // counts under every filter that picture belongs to.
+  //
+  // The lazy path calls tagsNeeded() instead, which reads the cache and only comes here on a miss.
+  // Written this way rather than as a tagCacheClear() beside each of the seven writers: that is the
+  // fourteen-call-sites shape the Busy module exists to stop, and the eighth writer would forget.
+  tagCacheClear();
+  return _fetchTags();
+}
+
+// The fetch itself, cache-neutral. Shared by loadTags (which has just emptied the cache) and by
+// tagsNeeded (which has just missed it).
+async function _fetchTags() {
+  const key = tagsKey();
+  const data = await getJSON('/api/tags?' + key);
+  tagCachePut(key, data);
+  applyTags(key, data);
+}
+
+// Put an answer on screen, whether it came from the server a moment ago or from the cache.
+function applyTags(key, data) {
+  _tagsKey = key;
+  _tagsStale = false;
+  _tagsEverLoaded = true;
   state._tags = data.tags || [];
   state._favCount = data.favorites || 0;
   renderTagList();
@@ -1465,7 +1626,52 @@ async function loadTags() {
   $('#tagoptions').innerHTML = state._tags.filter(t => !t.name.startsWith('label:'))
     .map(t => `<option value="${esc(t.name)}">`).join('');
 }
+// The ticked tags, said at the top of the pane. The list runs to hundreds of rows and the author
+// reported the real cost: "if you scroll down and check one tag, it's easy to lose track of it.
+// worse if you check multiple."
+//
+// Labels are NOT shown here even though they ride the same `state.tags` array. A label is chosen on
+// its own tab and only one can be on; a chip for something picked elsewhere would say a thing this
+// pane cannot undo.
+function renderTagChips() {
+  const picked = (state.tags || []).filter(t => !t.startsWith('label:'));
+  const row = $('#tagChips'); if (!row) return;
+  const btn = $('#tagChipsClear');
+  row.querySelectorAll('.chip').forEach(c => c.remove());
+  // Inserted BEFORE the button, which lives in the markup: rebuilding the row's innerHTML would
+  // throw away the button and its listener with it.
+  for (const t of picked) {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.innerHTML = `<span title="${esc(t)}">${esc(t)}</span>` +
+                     `<button data-untag="${esc(t)}" title="Remove"></button>`;
+    row.insertBefore(chip, btn);
+  }
+  row.classList.toggle('is-empty', picked.length === 0);
+}
+// Untick one tag, or all of them, from the chips. Goes through the same state the checkboxes do, so
+// the list below re-renders ticked correctly whichever end you used.
+function untagFilter(name) {
+  state.tags = (state.tags || []).filter(t => t !== name);
+  renderTagList(); renderTagChips();
+  search(true);
+}
+function clearTagFilters() {
+  if (!(state.tags || []).some(t => !t.startsWith('label:'))) return;   // keeps the label alone
+  state.tags = (state.tags || []).filter(t => t.startsWith('label:'));
+  renderTagList(); renderTagChips();
+  search(true);
+}
 // Render the tag checkbox list, filtered by the search box text. Checked = active filter (AND).
+//
+// NO NUMBER ON A TAG ROW since 2026-09-18. The author: "what difference does count really make,
+// except for sort order?" Very little, once the list narrows properly -- a tag that would give you
+// nothing is no longer listed at all, so PRESENCE is the signal the number was standing in for, and
+// the order still carries how common each one is. Favorites keeps its count: it is one row rather
+// than one of hundreds, and "how many am I looking at" is a real question there.
+//
+// The server still SENDS a count. It is what the rows are ordered by, and dropping it from the
+// payload would move that ordering into the client for no gain.
 function renderTagList() {
   const q = (($('#tagSearch') || {}).value || '').trim().toLowerCase();
   const favChk = state.favOnly ? ' checked' : '';
@@ -1479,9 +1685,10 @@ function renderTagList() {
     // are only an extension's (`t.machine`, true only when no user row exists for that tag), and
     // that goes into the tooltip rather than into the type.
     const mtitle = t.machine ? ' — found by an extension' : '';
-    html += `<label class="tagrow" title="${esc(t.name)}${mtitle}"><input type="checkbox" data-tag="${esc(t.name)}"${chk}><span class="tname">${esc(t.name)}</span><em class="tcount">${t.count}</em><button class="tagdel" data-del="${esc(t.name)}" title="Delete tag everywhere">×</button></label>`;
+    html += `<label class="tagrow" title="${esc(t.name)}${mtitle}"><input type="checkbox" data-tag="${esc(t.name)}"${chk}><span class="tname">${esc(t.name)}</span><button class="tagdel" data-del="${esc(t.name)}" title="Delete tag everywhere">×</button></label>`;
   }
   $('#taglist').innerHTML = html;
+  renderTagChips();
 }
 // Type a new tag + Enter in the search box -> apply it to the currently selected images.
 async function addTagToSelection(tag) {
@@ -1637,6 +1844,12 @@ const CARD_FACTS = [
   // fmtBytes(null) returns an em dash BY DESIGN, and its comment asks callers needing a different
   // format to take an argument rather than teach it a second one -- so this guards at the call
   // site. A stray dash in the band is the likeliest way this ships subtly wrong.
+  // Tempo and key are audio's answer to Dimensions: a fact only one kind of file has, absent on
+  // everything else. They live here rather than in the drawn face so that a song's small print has
+  // ONE home -- the face kept its own copy while the band refused to draw at all, and two places
+  // for the same facts is what let the band's absence go unnoticed. See cardFactsHTML.
+  { key: 'bpm',      tier: 'always', label: 'Tempo',      get: it => it.bpm ? `${it.bpm} bpm` : '' },
+  { key: 'key',      tier: 'always', label: 'Key',        get: it => it.key || '' },
   { key: 'filesize', tier: 'hover',  label: 'File size',  get: it => it.size != null ? fmtBytes(it.size) : '' },
   { key: 'model',    tier: 'hover',  label: 'Model',      get: it => it.model || '' },
   { key: 'folder',   tier: 'hover',  label: 'Folder',     get: it => folderLeaf(it.folder) },
@@ -1672,10 +1885,14 @@ function cardFactLine(it, tier, list) {
 }
 
 function cardFactsHTML(it) {
-  // A song's face already draws its own duration, tempo and key, and it is tight at every card
-  // size -- a second band would print the length twice and fight the drawing. Same reason .cap is
-  // suppressed there (see style.css).
-  if (it.is_audio) return '';
+  // SONGS GET THE BAND TOO, since 2026-09-18. It used to bail out here on `it.is_audio`, because
+  // the drawn face already prints the duration -- true, and true of nothing else. Age, file size,
+  // model and folder are not on the face at all, so one overlapping fact suppressed five. The
+  // author, putting a track beside an image from the same grid: "Unclear why audio/music cards
+  // don't behave the same."
+  // The overlap itself is settled in CSS rather than here: the face's own .song-facts row is hidden
+  // at the sizes where this band exists (.grid.cards-lg and up), so duration prints exactly once at
+  // every card size -- the face's copy on Small and Medium, this one on Large and Extra-large.
   const list = cardFactList();
   let rows = '';
   for (const tier of CARD_FACT_TIERS) {
@@ -1726,7 +1943,7 @@ setInterval(refreshCardAges, AGE_TICK_MS);
 // Every card again, from the items already in hand. No fetch, no scroll reset, no selection lost —
 // cardHTML reads `selection` itself, so a repaint restores the ticks rather than clearing them.
 // This is what a Settings change costs, instead of search(true): a full re-query measured 3.6s on
-// a real trace, which is why saveSettings only re-searches when the RESULTS would differ.
+// a real trace, which is why a settings save only re-searches when the RESULTS would differ.
 function repaintCards() {
   document.querySelectorAll('#grid .card').forEach(el => {
     const it = state.items.find(x => String(x.id) === String(el.dataset.id));
@@ -1844,7 +2061,7 @@ function thumbAt(url, cssPx) {
 //     says must not flip this on.
 // The strip keeps its own signal: renderLibTrigger() colours the `▤ 1/4` readout beside the count.
 function filtersActive() {
-  return !!(state.terms.length || state.xterms.length || state.model || state.folder || state.modelFolder || state.meta || state.type ||
+  return !!(state.terms.length || state.xterms.length || state.model || state.folder || state.modelFolder || state.meta || state.type || state.aspect ||
             state.tags.length || state.favOnly || state.hasNote ||
             state.rmin !== '' || state.rmax !== '' ||
             state.dfrom || state.dto ||
@@ -1910,6 +2127,7 @@ function tabCounts() {
   if (state.modelFolder) filters++;
   if (state.meta) filters++;
   if (state.type) filters++;
+  if (state.aspect) filters++;
   if (state.group === false || state.sets === false) filters++;   // Sets away from default (merge both)
   if (state.rmin !== '' || state.rmax !== '') filters++;
   if (state.dfrom || state.dto) filters++;
@@ -1936,8 +2154,20 @@ function setActiveTab(name) {
   sb.classList.add('tab-' + name);
   document.querySelectorAll('.filter-tabs .ftab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   try { localStorage.setItem(ACTIVE_TAB_KEY, name); } catch (e) {}
+  if (name === 'tags' || name === 'labels') tagsNeeded();
   if (name === 'tags') sizeTagList();
 }
+// Where the tab panes begin, for the overlay that covers them. Measured rather than assumed: the
+// strip's height moves with the font size and with whether any badge is showing, so a constant
+// would be right until the first time either changed. Re-measured whenever it is shown and on
+// resize -- the two things that invalidate it.
+function sizeTabBusy() {
+  const tabs = document.querySelector('.filter-tabs'), sb = $('#sidebar');
+  if (!tabs || !sb) return;
+  const top = tabs.getBoundingClientRect().bottom - sb.getBoundingClientRect().top + sb.scrollTop;
+  sb.style.setProperty('--tabpane-top', Math.round(top) + 'px');
+}
+window.addEventListener('resize', sizeTabBusy);
 // Size the Tags list so it flows down to the window bottom (offset above it is dynamic).
 function sizeTagList() {
   const el = $('#taglist');
@@ -1984,7 +2214,7 @@ let _searchSeq = 0;   // supersede token: a filter change invalidates any in-fli
 function searchParams(offset, limit) {
   return new URLSearchParams({
     q: queryString(), x: excludeString(), model: state.model, folder: state.folder, mfolder: state.modelFolder, meta: state.meta,
-    type: state.type, group: state.group ? '1' : '', sets: state.sets ? '1' : '', tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(),
+    type: state.type, aspect: state.aspect, group: state.group ? '1' : '', sets: state.sets ? '1' : '', tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(),
     rmin: state.rmin, rmax: state.rmax, after: dateAfter(), before: dateBefore(),
     sort: state.sort, order: state.order, limit: (limit || state.limit), offset: offset,
     // Only meaningful to sort=random, and harmless otherwise. It MUST be identical for every page
@@ -2120,6 +2350,7 @@ async function prependNewImages() {
 //   job   a full-screen block for cancellable work (a scan) — the grid is stale, browsing it is moot
 //   rail  the SIDEBAR ITSELF is being rewritten (boot, Reset, a snapshot, a library switch)
 //   pane  the results are being replaced (any filter change)
+//   tab   ONE sidebar tab's contents are being fetched (the tag and label counts)
 //   more  another page is loading as you scroll
 // `rail` implies `pane`: a whole-rail operation always replaces the results too, and that invariant
 // lives HERE, in the paint, rather than one setter reaching across the file into another. Same for
@@ -2145,8 +2376,9 @@ const PANE_BUSY_DELAY_MS = 400;
 // the ~135ms page that caused the strobe while still catching one that stalls.
 const MORE_BUSY_DELAY_MS = 250;
 const Busy = (() => {
-  const owner = { job: 0, rail: 0, pane: 0, more: 0 };
+  const owner = { job: 0, rail: 0, pane: 0, tab: 0, more: 0 };
   let seq = 0, paneT = null, paneShown = false, moreT = null, moreShown = false;
+  let tabT = null, tabShown = false;
   const held = t => !!owner[t];
   // Lazily built overlays: #gridBusy and #moreBusy are in the markup, the other two are made once.
   function lazy(id, cls, parent) {
@@ -2161,6 +2393,7 @@ const Busy = (() => {
   const el = {
     job:  () => lazy('taskScrim', 'task-scrim', document.body),
     rail: () => lazy('sidebarBusy', 'sidebar-busy', $('#sidebar')),   // blur + block; no spinner of its own
+    tab:  () => $('#tabBusy'),
     pane: () => $('#gridBusy'),
     more: () => $('#moreBusy'),
   };
@@ -2169,6 +2402,9 @@ const Busy = (() => {
     const job  = held('job');
     const rail = held('rail');
     const pane = (held('pane') || rail) && !job;
+    // Silenced by a louder tier the same way the others are: while the whole rail is being
+    // rewritten, or a scan owns the screen, one tab's numbers are not the story.
+    const tab = held('tab') && !rail && !job;
     const more = held('more') && !pane && !job;
     const j = el.job(), r = el.rail(), m = el.more(), p = el.pane();
     if (j) j.classList.toggle('hidden', !job);
@@ -2205,6 +2441,24 @@ const Busy = (() => {
         p.classList.remove('slow');   // fades out with the scrim; both transitions are 0.18s
       }
       paneShown = pane;
+    }
+    const tEl = el.tab();
+    if (tEl && tab !== tabShown) {
+      clearTimeout(tabT);
+      if (tab) {
+        sizeTabBusy();
+        tEl.classList.remove('hidden');
+        // Immediately when there is NOTHING to look at yet. The delay exists to stop a spinner
+        // flashing over content that is already readable; on the first visit the pane is empty, and
+        // waiting 400ms to explain an empty pane is the case the author actually hit -- "the first
+        // time I visited the tab, it was blank".
+        if (!_tagsEverLoaded) tEl.classList.add('slow');
+        else tabT = setTimeout(() => tEl.classList.add('slow'), PANE_BUSY_DELAY_MS);
+      } else {
+        tEl.classList.add('hidden');
+        tEl.classList.remove('slow');
+      }
+      tabShown = tab;
     }
   }
   return {
@@ -2311,7 +2565,9 @@ async function search(reset, opts) {
     // counts beside them, which became filter-aware on 2026-09-14 and so have to be re-asked here
     // like everything else. They rode the old boot-only path until then, which is exactly why they
     // could sit at a whole-library total while the grid showed one card.
-    if (!opts || opts.facets !== false) { loadFacets(); loadTags(); }
+    // Facets are on the Filters tab, which is where you just clicked, so they refresh now. The tag
+    // and label counts are behind a tab; they go stale and are re-asked when something needs them.
+    if (!opts || opts.facets !== false) { loadFacets(); tagsWentStale(); }
     // The dim belongs to THIS search: hold its token and only it can lower it. A newer search
     // raising its own makes this one's token stale, and a stale release is a silent no-op — which is
     // the right answer for a superseded search and used to need a hand-written seq check at each of
@@ -2555,7 +2811,7 @@ function toggleSelect(card, shift) {
 }
 async function selectAllMatching() {
   const p = new URLSearchParams({ q: queryString(), x: excludeString(), model: state.model, folder: state.folder, mfolder: state.modelFolder,
-    meta: state.meta, type: state.type, group: state.group ? '1' : '', sets: state.sets ? '1' : '', tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(), rmin: state.rmin, rmax: state.rmax, after: dateAfter(), before: dateBefore(),
+    meta: state.meta, type: state.type, aspect: state.aspect, group: state.group ? '1' : '', sets: state.sets ? '1' : '', tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(), rmin: state.rmin, rmax: state.rmax, after: dateAfter(), before: dateBefore(),
   });
   const data = await getJSON('/api/ids?' + p.toString());
   selection.clear();
@@ -3042,6 +3298,7 @@ async function openDetail(id) {
   const paired = !!(it && it.video_id != null && !it.is_video);
   const d = await getJSON('/api/image/' + id);   // for a pair, `id` is the still (representative)
   state.current = d;
+  traceMetaMethod(d);
   // Image set: show all members side by side for a keep-one cull instead of a single media element —
   // but only when the set is actually collapsed in the grid (Image-sets toggle on, so it.is_set is
   // true). With the toggle off the members are separate cards, so open the clicked image on its own.
@@ -3349,6 +3606,10 @@ function openTagModal() {
   $('#mTagInput').value = '';
   $('#mTagStatus').textContent = '';
   renderModalTags();
+  // The editor offers your existing tags as you type, and it opens from the grid and the detail
+  // view -- neither of which has been anywhere near the Tags tab. So this is the other place that
+  // has to ask for the list, and the reason it cannot simply key off which tab is showing.
+  tagsNeeded();
   $('#tagModal').classList.remove('hidden');
   setTimeout(() => $('#mTagInput').focus(), 30);
 }
@@ -4067,11 +4328,29 @@ function setVideoSource(d) {
 // A song, same component and same reason as a video: it cannot be dragged as itself, so the handle
 // is the picture that carries its workflow. The label names what the picture IS, because calling a
 // drawn waveform "cover art" would be a small lie on a song that has none.
+//
+// TWO SOURCES, exactly as a video has. A song whose cover was saved BESIDE it has a real picture
+// carrying the whole run's workflow, and that file is the drag source (/file/) -- the same choice a
+// paired video makes about its still, for the same reason. A song with only embedded art, or none,
+// has no such file, so the server builds one out of the song itself (/dragpng/).
+//
+// The paired case is not a refinement, it is the one that was BROKEN: building a picture out of the
+// song reads the audio file's own tags, which only works on an MP3, so every FLAC showed a broken
+// box here. It also cures a small lie in the label, since a song whose cover sits beside it would
+// otherwise be captioned "Cover" over a drawn waveform.
 function setSongSource(d) {
   const box = $('#dPairSrc'); if (!box) return;
   setPairStills(null);
-  $('#dPairThumb').src = originalUrlFor(d.thumb_url, d.filename, 'audio');
-  $('#dPairSrcLabel').innerHTML = dragSourceLabel(d.cover_url ? 'Cover' : 'Waveform');
+  // NO WORKFLOW, NO HANDLE. The picture here is built out of the song's own graph, so a track that
+  // carries none has nothing to build from and the <img> used to land on an error -- which is the
+  // broken box the author reported on a FLAC. Reading FLAC tags fixes his files; this covers the
+  // rest, because a song from any other tool still has no graph and must not be offered a control
+  // that would drop an empty picture into ComfyUI. Same rule #dComfyOpen already follows: a button
+  // that promises what the file cannot do is worse than no button.
+  if (!d.has_workflow) { hidePairSource(); return; }
+  $('#dPairThumb').src = d.cover_file_url || originalUrlFor(d.thumb_url, d.filename, 'audio');
+  $('#dPairSrcLabel').innerHTML =
+    dragSourceLabel((d.cover_file_url || d.cover_url) ? 'Cover' : 'Waveform');
   box.classList.remove('hidden');
 }
 function hidePairSource() {
@@ -4885,7 +5164,7 @@ function clampField(el) {
   el.value = el.step && el.step.includes('.') ? String(Math.round(n * 10) / 10) : String(Math.round(n));
 }
 let settingsDefaults = null;
-// What the grid looked like before the dialog was opened — see saveSettings. Nothing in here
+// What the grid looked like before the dialog was opened — see applySettingsEcho. Nothing in here
 // changes which images the grid shows any more; what is compared is the card FACTS.
 function fillFields(fields, obj) {
   for (const [k, id] of Object.entries(fields)) {
@@ -4944,7 +5223,7 @@ function renderCardFactRows() {
     </div>`;
   }).join('');
 }
-// Up/down rather than drag, the author's call: with six rows you are never more than a few clicks from
+// Up/down rather than drag, the author's call: at this many rows you are never more than a few clicks from
 // any arrangement, it works from the keyboard, and there is no way to drop one in the wrong place.
 function moveCardFact(key, by) {
   const i = (_cardsEdit || []).findIndex(r => r.key === key);
@@ -5016,7 +5295,19 @@ const THEME_LIGHT = {
   // light surface (--bg, --bg2, --bg3, --sidebar-bg), not only the pairs the audit happens to
   // check, so a new pairing later cannot quietly reopen this.
   //   --accent  4.38 -> 4.65   --danger  4.08 -> 4.63
-  //   --success 3.20 -> 4.63   --active  2.82 -> 3.10 (a state mark, so its bar is 3.0)
+  //   --success 3.20 -> 4.63   --active  2.82 -> 3.10 -> 4.93
+  // --active WAS RAISED A SECOND TIME, 2026-09-18, and the first raise is why: 3.10 was chosen
+  // for a STATE MARK, whose bar is 3.0, and that is what --active is in five of its six uses --
+  // the green edge and ring on a filter that is set. The sixth is `.lib-stat.filtered`, the
+  // Libraries strip's "4/5" and its icon, where the same green is TEXT and the bar is 4.5. It
+  // measured 3.05:1 on the light rail. The author spotted it by eye: "the library icon & label
+  // read too light in terms of color in light mode. Not sure they'd pass WCAG." They did not.
+  // ONE VALUE RATHER THAN A SECOND TOKEN, because darkening it costs the five border uses
+  // nothing -- an edge that clears 4.93 also clears 3.0 -- and a --active-text sitting beside
+  // --active is two greens to keep in step for no gain. 4.93 on the rail, 6.72 on white.
+  // The lesson generalises and is the reason the numbers above are written down: a contrast
+  // target is a property of the JOB, not of the colour, so a token tuned for one job quietly
+  // fails the moment a second job borrows it.
   // --star is deliberately UNCHANGED. Darkening gold far enough to clear 3.0 lands on #b78216,
   // which is not gold any more; it gets --star-edge instead, a rim, which is what WCAG's 3.0 asks
   // for on a component to begin with. The author's call after seeing both.
@@ -5031,10 +5322,25 @@ const THEME_LIGHT = {
   // the exact pair that morning's contrast pass had fixed. #2a8e45 holds 3.05 on the darkest of
   // the four light surfaces. Moving a ground is never just the ground: every mark measured
   // against it moves too.
-  '--accent': '#2061d3', '--active': '#2a8e45', '--danger': '#c42b2b',
-  '--success': '#23763a', '--modified': '#8f5d0c',   // 4.6:1 on the light rail
+  '--accent': '#2061d3', '--active': '#1f6933', '--danger': '#c42b2b',
+  '--success': '#23763a', '--modified': '#835204',
+  // --modified WAS #8f5d0c, and the comment here claimed 4.6:1 on the light rail. It measured
+  // 4.13:1 -- the 4.6 was against --bg, not the rail the marker actually sits on. Same defect as
+  // --active above and found in the same sweep: this amber is TEXT everywhere it is used (the
+  // Libraries catch-up link, a dirty library's count, the snapshot drift dot, the Update
+  // notice, .set-test.warn), so its bar is 4.5 and never 3.0.
+  // SATURATION UP AS LIGHTNESS COMES DOWN, rather than mixing toward black. Mixing with black
+  // drops chroma along with lightness, and an amber dragged far enough to clear 4.5 that way
+  // arrives as brown -- losing the colour costs more than the contrast gains, since amber's
+  // whole job here is to read as 'wants your attention' at a glance. Hue is untouched at 37deg;
+  // saturation 85 -> 95%, lightness 30 -> 26%. 4.86:1 on the rail, 6.62:1 on white, and it
+  // clears 4.5 on all four light surfaces.
 };
-let _themeEdit = {};   // working overrides while the Appearance tab is open
+// Which mode you are on, and what each mode has been changed to. Only the tokens you actually
+// touched are stored, so a preset that changes in a later version still reaches an edited mode
+// for every colour the user left alone.
+let _themeMode = 'dark';
+let _themeEdits = { dark: {}, light: {} };
 // Apply overrides live; a token absent from `obj` reverts to its CSS default.
 function applyTheme(obj) {
   const s = document.documentElement.style;
@@ -5104,36 +5410,35 @@ function renderThemeRows() {
       `<span class="tr-name">${esc(label)}</span><code class="tr-hex">${tokenHex(t)}</code></label>`).join('')
   ).join('');
 }
-// Load a preset/override set into the working copy, apply it, and refresh the pickers.
-function setThemeEdit(obj) { _themeEdit = { ...obj }; applyTheme(_themeEdit); renderThemeRows(); syncThemeSeg(); }
+/* ---- two modes, each with its own edits ------------------------------------------------------
+   Dark and Light are the only themes. A colour you change belongs to the mode you changed it ON,
+   so switching across and back finds your work where you left it, and Reset puts that mode -- and
+   only that mode -- back to stock.
 
-/* ---- which theme segment is TRUE ------------------------------------------------------------
-   The bar reports a state, it does not remember a click. Asking the colours themselves means a
-   theme restored from config.json lights the right segment without anything having to have stored
-   which button was last pressed -- and editing one swatch moves you to Custom on its own, which is
-   the thing the old row could not say. */
-function sameTheme(a, b) {
-  const ka = Object.keys(a || {}), kb = Object.keys(b || {});
-  return ka.length === kb.length &&
-         ka.every(k => String(a[k] || '').toLowerCase() === String(b[k] || '').toLowerCase());
-}
-function themeMode(obj) {
-  if (!obj || !Object.keys(obj).length) return 'dark';   // no overrides at all IS the dark default
-  return sameTheme(obj, THEME_LIGHT) ? 'light' : 'custom';
-}
-// Your own colours, held aside while you look at a preset, so previewing Light and coming back
-// does not cost you the set you were building. Null until there is one to keep.
-let _themeCustom = null;
+   This replaced a third segment called Custom, which named a STATUS rather than a theme: you
+   never chose it, you fell into it by touching a swatch, and it was greyed out until you had.
+   Worse, there was one slot for both modes: a palette built on Light was silently replaced the
+   moment you tweaked a swatch while on Dark. The author, 2026-09-19, once the model was clear:
+   "Dark and Light EACH need a customized state that can be reset." */
+function themeBase(mode) { return mode === 'light' ? THEME_LIGHT : {}; }
+// What the app actually applies: the mode's preset with that mode's edits laid over it.
+function resolvedTheme() { return { ...themeBase(_themeMode), ..._themeEdits[_themeMode] }; }
+function modeIsEdited(mode) { return Object.keys(_themeEdits[mode] || {}).length > 0; }
+// Apply, repaint the swatches, and let the bar and Reset report the new truth.
+function applyThemeEdit() { applyTheme(resolvedTheme()); renderThemeRows(); syncThemeSeg(); }
+
+/* ---- the bar reports which mode you are on, and Reset reports whether you have changed it ----
+   The bar remembers a click now rather than deducing one from the colours. It has to: an edited
+   Dark and an edited Light are both "a set of overrides", and no amount of looking at them says
+   which mode the user believes they are in. That deduction is exactly what produced Custom. */
 function syncThemeSeg() {
-  const mode = themeMode(_themeEdit);
-  if (mode === 'custom') _themeCustom = { ..._themeEdit };   // keep the latest as you edit
   document.querySelectorAll('#themeSeg button').forEach(b => {
-    b.classList.toggle('active', b.dataset.theme === mode);
-    // Custom is a real segment only once there is something to go back TO. Disabled rather than
-    // hidden: a bar that changes width when you touch a swatch is a bar that moves under the
-    // pointer, and the segment has to be visible for its absence to mean anything.
-    if (b.dataset.theme === 'custom') b.disabled = !_themeCustom;
+    b.classList.toggle('active', b.dataset.theme === _themeMode);
   });
+  const r = $('#themeReset');
+  // Disabled when there is nothing to undo, so the button never discards nothing -- and its state
+  // is also the only thing on the tab that answers "have I changed this mode?".
+  if (r) r.disabled = !modeIsEdited(_themeMode);
 }
 
 async function openSettings(section) {
@@ -5153,11 +5458,15 @@ async function openSettings(section) {
   renderExtRows();
   if (applyExtensions()) search(true);
   state.theme = cfg.theme || {};
-  _themeEdit = { ...state.theme }; renderThemeRows();   // start editing from the saved theme
-  // A saved theme that matches neither preset IS your custom one, so Custom is reachable the moment
-  // the dialog opens rather than only after you touch a swatch in this sitting.
-  _themeCustom = themeMode(state.theme) === 'custom' ? { ...state.theme } : null;
-  syncThemeSeg();
+  // The mode and its edits, not the resolved colours: the server migrates an older config into
+  // this shape, so there is one place that has to understand the old one and it is not here.
+  _themeMode = (cfg.theme_mode === 'light') ? 'light' : 'dark';
+  const ed = cfg.theme_edits || {};
+  _themeEdits = { dark: { ...(ed.dark || {}) }, light: { ...(ed.light || {}) } };
+  // Apply before drawing the swatches rather than trusting boot to have left the page right: the
+  // rows read the COMPUTED value, so a page whose colours and whose stored recipe disagree — the
+  // first open after a migration, say — would draw pickers that lie about what is stored.
+  applyThemeEdit();
   // Same working-copy contract. Deep-copied, or Cancel would leave the edits behind in state.cards.
   state.cards = cfg.cards || state.cards;
   _cardsEdit = (state.cards || []).map(r => ({ ...r }));
@@ -5171,30 +5480,82 @@ async function openSettings(section) {
   $('#setStatus').textContent = '';
   $('#settings').classList.remove('hidden');
 }
-function closeSettings() {
-  applyTheme(state.theme);              // revert any unsaved live theme edits to the saved theme
+async function closeSettings() {
+  // NOTHING IS REVERTED HERE ANY MORE. The theme on screen IS the saved theme, because touching a
+  // swatch wrote it -- what this has to do instead is make sure a save the last keystroke only
+  // QUEUED is not thrown away by the window closing.
+  await flushSettingsSave();
   $('#settings').classList.add('hidden');
 }
-async function saveSettings() {
-  const btn = $('#setSave'); btn.disabled = true; btn.textContent = 'Saving…';
-  // ONE SAVE FOR THE WHOLE WINDOW. An extension's panel is a tab of Settings like any other, so
-  // it saves with the Save button rather than growing one of its own -- a second Save inside a
-  // dialog that already has one is a question about which button did what. The exception stays
-  // the on/off switch in the installed list, which is immediate on purpose (see its handler).
-  for (const ex of readExtSettings()) {
-    const r = await postJSON('/api/extensions/settings', ex);
-    if (r.error) {
-      btn.disabled = false; btn.textContent = 'Save';
-      $('#setStatus').textContent = '⚠ ' + r.error;
-      return;
+/* ---- Settings writes as you change it -------------------------------------------------------
+   THERE IS NO SAVE BUTTON, and no Cancel either. A dialog carrying both asks you to keep a model
+   of which edits are committed and which are not, for a window whose every control is one value.
+   The one thing that model protected was a colour palette mid-experiment -- and that is kept on
+   the mode's own edits now, so switching to the other mode and back costs nothing.
+
+   A tick, a dropdown or a preset writes at once. Anything typed waits for a pause, so a path is
+   saved when you stop rather than nine times on the way through it. */
+let _saveTimer = null;
+let _saveInFlight = false;
+let _saveAgain = false;
+let _statusTimer = null;
+
+// Muted text with a ⚠ prefix for a failure — the same shape the old Save button's status line
+// used, so this adds no vocabulary. "Saved" clears itself after a beat; a warning stays up until
+// the next save has something else to say, because a failure the user blinked past is a setting
+// they believe took and did not.
+function setSettingsStatus(text, transient) {
+  const el = $('#setStatus'); if (!el) return;
+  clearTimeout(_statusTimer);
+  el.textContent = text;
+  if (transient) _statusTimer = setTimeout(() => { el.textContent = ''; }, 2400);
+}
+
+function queueSettingsSave(now) {
+  clearTimeout(_saveTimer); _saveTimer = null;
+  if (now) { commitSettings(); return; }
+  _saveTimer = setTimeout(() => { _saveTimer = null; commitSettings(); }, 500);
+}
+
+// Used by close: a save the last keystroke had only QUEUED must not be lost to the window shutting,
+// and one already in flight has to be allowed to land.
+async function flushSettingsSave() {
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; await commitSettings(); }
+  while (_saveInFlight) await new Promise(r => setTimeout(r, 25));
+}
+
+async function commitSettings() {
+  // COALESCE rather than queue up. Two saves in flight can land out of order, and the later one
+  // carries the whole window anyway -- every value is read from the DOM at send time, so one more
+  // pass after this finishes says everything the skipped ones would have.
+  if (_saveInFlight) { _saveAgain = true; return; }
+  _saveInFlight = true;
+  setSettingsStatus('Saving…');
+  try {
+    // An extension's panel is a tab of Settings like any other and saves the same way. The
+    // exception stays the on/off switch in the installed list, which has always been immediate.
+    for (const ex of readExtSettings()) {
+      const r = await postJSON('/api/extensions/settings', ex);
+      if (r.error) { setSettingsStatus('⚠ ' + r.error); return; }
+      state.extensions = r.extensions || state.extensions;
     }
-    state.extensions = r.extensions || state.extensions;
+    // `theme` is the RESOLVED set the app applies; the mode and the edits are the recipe. Always
+    // sent together, so the two cannot disagree -- the server has no way to resolve them itself,
+    // because the light preset's values live here beside the stylesheet they override.
+    const body = { general: readFields(GENERAL_FIELDS), miner: readMiner(),
+                   theme: resolvedTheme(), theme_mode: _themeMode, theme_edits: _themeEdits,
+                   cards: _cardsEdit || undefined };
+    const j = await postJSON('/api/settings', body);
+    if (j.error) { setSettingsStatus('⚠ ' + j.error); return; }
+    applySettingsEcho(j);
+    setSettingsStatus('Saved', true);
+  } finally {
+    _saveInFlight = false;
+    if (_saveAgain) { _saveAgain = false; commitSettings(); }
   }
-  const j = await postJSON('/api/settings',
-    { general: readFields(GENERAL_FIELDS), miner: readMiner(), theme: _themeEdit,
-      cards: _cardsEdit || undefined });
-  btn.disabled = false; btn.textContent = 'Save';
-  if (j.error) { $('#setStatus').textContent = '⚠ ' + j.error; return; }
+}
+
+function applySettingsEcho(j) {
   state.theme = j.theme || {};       // server echoes the validated theme
   // The echo again, not the selects: the server drops unknown keys and appends any fact this
   // config predates, so its answer is the one the grid must draw from.
@@ -5210,11 +5571,15 @@ async function saveSettings() {
   // rather than next launch, and switching it off takes the mark down rather than leaving it lit
   // over a feature the user just turned off. A setting whose effect waits for a restart is one the
   // user reasonably reads as broken.
-  state.updateCheck = !(j.general && j.general.update_check === false);
-  if (state.updateCheck) checkForUpdate();
-  else { _update = null; $('#btnUpdate').classList.add('hidden'); closeUpdateBox(); }
-  closeSettings();
-  toast('Settings saved');
+  // ONLY WHEN IT ACTUALLY CHANGED, now that this runs on every edit rather than once per Save:
+  // checkForUpdate() goes to the network, and firing it again for each character typed into the
+  // models folder would be a request per keystroke for a setting nobody touched.
+  const wantUpdateCheck = !(j.general && j.general.update_check === false);
+  if (wantUpdateCheck !== state.updateCheck) {
+    state.updateCheck = wantUpdateCheck;
+    if (state.updateCheck) checkForUpdate();
+    else { _update = null; $('#btnUpdate').classList.add('hidden'); closeUpdateBox(); }
+  }
   // ONLY IF THE GRID'S CONTENTS ACTUALLY CHANGED. Saving used to rebuild the whole grid whatever
   // you had touched — a 3.6s stall, on a real trace, for switching the debug trace on.
   // NOTHING IN THIS DIALOG CHANGES WHICH IMAGES THE GRID SHOWS any more: "Hide large images" and
@@ -5533,7 +5898,12 @@ async function refreshView(opts) {
   // serial round trip tacked on the end — free locally, a real wait on a share — and it has no
   // reason to wait: the scan that prompted it has already finished. Awaited with the rest, so the
   // "new files pending" mark still settles before the reveal rather than clearing a beat later.
-  const jobs = [loadFacets(), loadTags(), gridJob];
+  // NOT loadTags() any more, and not tagsNeeded() either -- this runs on every refresh, not only
+  // at boot, so asking here would be the old behaviour wearing a new name. The counts go stale and
+  // are re-asked by whoever looks at them next; if a tab showing them is already open, that is
+  // immediately. At boot the restored tab has been set before this runs, so the same rule decides
+  // whether the rail waits for them at all.
+  const jobs = [loadFacets(), Promise.resolve(tagsWentStale()), gridJob];
   if (o.changes) jobs.push(fetchChanges());
   await Promise.allSettled(jobs);
   markActiveFilters();
@@ -6619,6 +6989,33 @@ function traceGate(key, detail) {
   // of skips above.
   if (key) Trace.add('refresh', `tick stopped — ${detail}`);
 }
+// HOW THIS FILE'S PROMPT AND MODEL WERE WORKED OUT, recorded when you open one.
+//
+// The reader prefers to walk BACK from the node that saved the file, which is a fact about the
+// workflow; when it cannot, it falls back to picking the sampler with the longest prompt, which is
+// a guess. Both produce a row that looks equally confident, so the only way to tell a wrong answer
+// from an unlucky one is to know which happened — and it is read here rather than shown anywhere,
+// because nobody wants a badge on a picture explaining how its caption was derived.
+//
+// It says nothing at all for a file with no metadata: a blank row is not a fallback, it is a file
+// that never carried anything, and a line per empty video would drown the buffer.
+const _METHOD_WORDS = {
+  'saver-walk': 'walked back from the node that saved it',
+  'saver-walk-agreed': 'walked back — every saver in the workflow agreed',
+  'sampler-trace': 'FELL BACK to the longest prompt — the walk had no answer',
+  'longest-clip-fallback': 'FELL BACK to the longest text in the workflow — no sampler traced',
+  'a1111-chunk': 'read from the file’s own settings block, not a workflow',
+  'audio-caption': 'read from the track’s caption',
+  'sidecar': 'read from the .txt beside it',
+};
+function traceMetaMethod(d) {
+  if (!Trace.on || !d || d.error) return;
+  const m = (d.method || '').trim();
+  if (!m) return;
+  // Composed methods like `sidecar+saver-walk` are one answer topped up by another; name both.
+  const words = m.split('+').map(part => _METHOD_WORDS[part] || part).join(' · then ');
+  Trace.add('metadata', `${words} · ${d.filename || d.id}`);
+}
 // "Am I mid-task in a modal?" — renaming, changing a setting, tagging a selection. Refreshing the
 // library under one of those is obviously wrong, so background work stands down for them.
 //
@@ -7335,6 +7732,13 @@ $('#mediaType').addEventListener('click', e => {
   renderMediaType(); renderSetsMode();
   search(true);
 });
+// Shape: same delegated click as File type. No segConflict call -- see renderAspect.
+$('#aspect').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  state.aspect = b.dataset.aspect || '';
+  renderAspect();
+  search(true);
+});
 $('#hasNote').addEventListener('change', e => { state.hasNote = e.target.checked; search(true); });
 $('#mfolder').addEventListener('change', e => { state.modelFolder = e.target.value; search(true); });
 // filter tabs: switch panes + restore the last-used tab across sessions
@@ -8021,6 +8425,21 @@ $('#grid').addEventListener('dragstart', e => {
   if (!img || img.dataset.full !== '1') { e.preventDefault(); return; }
   e.dataTransfer.effectAllowed = 'copy';     // else the browser's native image drag carries the file
 });
+// NO dragstart HANDLER ON #dPairThumb, and that is deliberate now rather than by omission.
+//
+// One was added on 2026-09-18 while chasing a song that would not drag, reasoning that the grid
+// sets `effectAllowed = 'copy'` and the detail view set nothing. It broke VIDEO dragging, which
+// had worked for months — the author: "video thumbnail drag to comfy is now broken too - they
+// used to work." Touching dataTransfer in a dragstart handler makes the page an active
+// participant in a drag the BROWSER was otherwise running by itself, and a browser-run image drag
+// already carries the file. The grid needs its handler because it has a real decision to make
+// (refuse the drag until the full-size original has loaded, or ComfyUI gets the thumbnail); this
+// handle has no such decision, because its <img> only ever holds the finished picture.
+//
+// THE LESSON IS THE REASON THIS COMMENT IS HERE: a working path was changed on a theory, while
+// hunting a bug somewhere else, with no evidence anything was missing from it. Two of the three
+// "fixes" that day were speculative and this one did real damage. If a drag stops working, diff
+// before theorising.
 $('#selAll').addEventListener('click', selectAllMatching);
 $('#selClear').addEventListener('click', clearSelection);
 $('#selDelete').addEventListener('click', deleteSelected);
@@ -8087,8 +8506,14 @@ $('#taglist').addEventListener('change', e => {
     const name = cb.dataset.tag, i = state.tags.indexOf(name);
     if (cb.checked && i === -1) state.tags.push(name);
     else if (!cb.checked && i !== -1) state.tags.splice(i, 1);
+    renderTagChips();          // at once, not when the counts come back: the tick is instant
     search(true);
   }
+});
+$('#tagChips').addEventListener('click', e => {
+  if (e.target.id === 'tagChipsClear') return clearTagFilters();
+  const x = e.target.closest('[data-untag]');
+  if (x) untagFilter(x.dataset.untag);
 });
 $('#taglist').addEventListener('click', e => {
   const del = e.target.closest('.tagdel');
@@ -8298,7 +8723,7 @@ document.addEventListener('keydown', e => {
   }
 
   if (e.key === 'Escape') {                       // Escape closes the topmost layer
-    // THE MAGNIFIER IS NOT A LAYER (reversed 2026-09-15; see docs/decisions.md). It used to take
+    // THE MAGNIFIER IS NOT A LAYER (reversed 2026-09-15). It used to take
     // the first Escape, on the reasoning that dropping the lens beats closing the view out from
     // under someone who only wanted the magnifier gone. That held while pinning meant a deliberate
     // click on the icon. Now `z` pins it, so a lens is the ordinary state of the review flow — set a
@@ -8463,15 +8888,34 @@ $('#dReveal').addEventListener('click', () => { if (state.current) fetch('/api/r
 $('#dDelete').addEventListener('click', () => state.setMembers ? recycleSetFull() : deleteCurrent());
 // settings dialog
 $('#settingsClose').addEventListener('click', closeSettings);
-$('#settingsCancel').addEventListener('click', closeSettings);
 $('#settings .overlay-bg').addEventListener('click', closeSettings);
+/* ---- every control in this window saves itself -----------------------------------------------
+   ONE delegated pair for the whole overlay rather than a listener per field. Three of the panels
+   build their rows at runtime -- the colour swatches, the card facts, an extension's own settings
+   -- so wiring them individually means every future control has to remember to join in, and the
+   one that forgets looks exactly like a setting that does not work. */
+$('#settings').addEventListener('change', e => {
+  const el = e.target.closest('input, select, textarea'); if (!el) return;
+  if (el.id === 'setTrace') return;     // a property of this browser tab, deliberately not saved
+  queueSettingsSave(true);
+});
+$('#settings').addEventListener('input', e => {
+  const el = e.target.closest('input, select, textarea'); if (!el) return;
+  if (el.id === 'setTrace') return;
+  // A tick and a radio report `change` as well and are already handled there, at once. Everything
+  // else here is either typed or dragged -- a colour picker fires `input` continuously while the
+  // pointer moves -- and both want the pause rather than a write per event.
+  if (el.type === 'checkbox' || el.type === 'radio') return;
+  queueSettingsSave(false);
+});
 $('.settings-nav').addEventListener('click', e => {
   const t = e.target.closest('.settings-tab'); if (t) showSettingsSection(t.dataset.sec);
 });
 $('#setRecycleWarn').addEventListener('change', syncRecycleWarn);
-$('#setRecycleFiles').addEventListener('blur', e => clampField(e.target));
-$('#setRecycleGb').addEventListener('blur', e => clampField(e.target));
-$('#setSave').addEventListener('click', saveSettings);
+// Clamp first, then save what the clamp left: the number on screen and the number on disk have to
+// be the same one, and blur fires before the queued save would have.
+$('#setRecycleFiles').addEventListener('blur', e => { clampField(e.target); queueSettingsSave(true); });
+$('#setRecycleGb').addEventListener('blur', e => { clampField(e.target); queueSettingsSave(true); });
 // Global models folder: live "found / not found" hint so an unreachable path is obvious.
 $('#setModelsDir').addEventListener('blur', async () => {
   const el = $('#setModelsDirStatus'); const p = $('#setModelsDir').value.trim();
@@ -8482,25 +8926,33 @@ $('#setModelsDir').addEventListener('blur', async () => {
     el.className = 'set-test ' + (c.exists ? 'ok' : 'err');
   } catch (e) { el.textContent = ''; el.className = 'set-test'; }
 });
-// theme editor (Appearance tab): live color edits + presets
+// theme editor (Appearance tab): a colour belongs to the mode you change it on
 $('#themeRows').addEventListener('input', e => {
   const inp = e.target.closest('input[data-token]'); if (!inp) return;
-  _themeEdit[inp.dataset.token] = inp.value;
+  _themeEdits[_themeMode][inp.dataset.token] = inp.value;
   document.documentElement.style.setProperty(inp.dataset.token, inp.value);
   const hex = inp.parentElement.querySelector('.tr-hex'); if (hex) hex.textContent = inp.value;
-  // Touching a swatch is what MAKES it custom, so the bar has to follow the edit rather than the
-  // last button pressed. Not setThemeEdit: that re-renders every row, which would tear the open
-  // colour picker out from under the pointer mid-drag. syncThemeSeg only repaints the segments.
+  // Not applyThemeEdit: that re-renders every row, which would tear the open colour picker out
+  // from under the pointer mid-drag. syncThemeSeg only repaints the bar and Reset, and Reset is
+  // what has to wake up the moment this mode has an edit in it.
   syncThemeSeg();
 });
 document.querySelectorAll('#themeSeg button').forEach(b => b.addEventListener('click', () => {
   const want = b.dataset.theme;
-  if (want === themeMode(_themeEdit)) return;    // already true; a segment is not a re-apply button
-  // Bank what you built BEFORE leaving it, or previewing a preset would throw it away. syncThemeSeg
-  // keeps _themeCustom current while you are in Custom, so by here it is already the right set.
-  if (want === 'custom') { if (_themeCustom) setThemeEdit(_themeCustom); return; }
-  setThemeEdit(want === 'light' ? THEME_LIGHT : {});   // dark = no overrides = the CSS defaults
+  if (want === _themeMode) return;              // a segment is not a re-apply button
+  // Nothing is banked or discarded here: each mode's edits stay in their own slot, so switching
+  // is just switching. A segment is a button, so the delegated change listener never sees it.
+  _themeMode = want;
+  applyThemeEdit();
+  queueSettingsSave(true);
 }));
+// Reset: this mode back to stock, the other mode untouched.
+$('#themeReset').addEventListener('click', () => {
+  if (!modeIsEdited(_themeMode)) return;
+  _themeEdits[_themeMode] = {};
+  applyThemeEdit();
+  queueSettingsSave(true);
+});
 // BOTH TAKE THE LIBRARY AS AN ARGUMENT, and that is the whole fix. They used to be Settings buttons
 // with no library to name, so the server fell back to its invisible "management target" -- a pointer
 // set by adding a library or opening its menu, which nothing on screen shows and nobody chooses.

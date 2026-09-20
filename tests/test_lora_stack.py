@@ -9,7 +9,12 @@ MiniMax video run reported no LoRAs at all (the author, 2026-09-05):
   * rgthree's POWER LORA LOADER -- `lora_1..N`, each a dict;
   * A STACKER -- the whole list encoded as JSON in ONE string input. `LTX_lora_loader` ("LoRA
     Loader Stack (LTX / MiniMax H3 Compatible)") carries no `lora_name` whatsoever, so the first
-    test failed and nothing else looked. This is the shape that shipped blind.
+    test failed and nothing else looked. This is the shape that shipped blind;
+  * A REAL LIST -- the same bundle NOT written out as text. ComfyUI Lora Manager's loader keeps
+    `{"__value__": [...]}`, names the file under `name` rather than `lora`, and flags each entry
+    `active` rather than `on`. Three spellings of things already handled, and the only reason it
+    read as empty was that the stacker branch looked exclusively inside strings (the author,
+    2026-09-17, converting his workflows to that loader).
 
 WHY BY SHAPE AND NOT BY NAME. The class name and the `stack_data` key are one pack's choices; the
 convention -- a JSON list of entries with an `on` flag and a `lora` path -- is the part another
@@ -115,6 +120,45 @@ check('a prompt that merely mentions lora yields nothing',
 check('a malformed stack is ignored rather than raising',
       names({'1': {'class_type': 'LoraStacker', 'inputs': {'d': '[{"lora": broken'}}}), [])
 
+# ---- ComfyUI Lora Manager: a real list, not a string ----------------------------------------
+# Captured verbatim from KREA_Tests_18-50-25~vv3i4ng1_Raw_00001_.png, a run the viewer reported as
+# having no LoRAs at all. Extra keys are this pack's own UI state and must simply be ignored.
+LM = {'1834': {'class_type': 'Lora Loader (LoraManager)',
+               'inputs': {'text': 'Go to http://127.0.0.1:8188/loras to apply LoRAs '
+                                  '<lora:CRAIG_Mullins_krea2_3264412_epoch_20:1.00>',
+                          '__lm_autocomplete_meta_text': {'version': 1, 'textWidgetName': 'text'},
+                          'loras': {'__value__': [
+                              {'name': 'CRAIG_Mullins_krea2_3264412_epoch_20', 'strength': 1,
+                               'active': True, 'expanded': False, 'clipStrength': 1,
+                               'selected': False, 'locked': False}]},
+                          'model': ['1763', 1]}}}
+
+check('a real list is read, not only one written out as text',
+      names(LM), [('CRAIG_Mullins_krea2_3264412_epoch_20', 1)])
+
+check('`active: False` drops the entry, exactly as `on: False` does',
+      names({'1': {'class_type': 'Lora Loader (LoraManager)',
+                   'inputs': {'loras': {'__value__': [
+                       {'name': 'kept.safetensors', 'strength': 0.4, 'active': True},
+                       {'name': 'dropped.safetensors', 'strength': 1, 'active': False}]}}}}),
+      [('kept', 0.4)])
+
+check('a bare list with no wrapper is read too',
+      names({'1': {'class_type': 'SomeLoraBundle',
+                   'inputs': {'items': [{'name': 'bare.safetensors', 'strength': 0.3}]}}}),
+      [('bare', 0.3)])
+
+# The name is stored WITHOUT its extension here, and that is the value the hash resolver gets --
+# see test_lora_extensionless.py, where a name like this has to find the file on disk anyway.
+check('the raw name is kept exactly as stored, extension or not',
+      [l['raw'] for l in comfy_meta._extract_loras_raw(LM)],
+      ['CRAIG_Mullins_krea2_3264412_epoch_20'])
+
+# The node's own text field carries <lora:...> tags. It is NOT a second source -- reading both
+# would double every LoRA on a node that fills it in.
+check("the node's text field does not yield a second copy",
+      len(names(LM)), 1)
+
 # ---- the two copies must agree -------------------------------------------------------------
 print('')
 for label, graph in [('the stacker', STACKER),
@@ -123,7 +167,8 @@ for label, graph in [('the stacker', STACKER),
                                                            'strength_model': 1}}}),
                      ('a pysssss loader', {'1': {'class_type': 'LoraLoader|pysssss',
                                                  'inputs': {'lora_name': 'b.safetensors',
-                                                            'strength_model': 1}}})]:
+                                                            'strength_model': 1}}}),
+                     ('a Lora Manager loader', LM)]:
     check('the saver agrees with the viewer on %s' % label,
           names(graph, vendored), names(graph, comfy_meta))
     check('  ...including the raw names',

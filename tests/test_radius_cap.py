@@ -111,16 +111,17 @@ check('no rule puts an oversized radius on a mark it also sizes', not offenders,
       '\n          '.join(offenders))
 
 # ---- named pins for the marks that shipped wrong ---------------------------------------------
-# The set leaves are sized as a PERCENTAGE of the parent, so the sweep above cannot see their real
-# 8px side. Pinned by token instead: --radius-2xs is the only step that satisfies the cap there.
+# THE SET MARK'S PIN CHANGED SHAPE ON 2026-09-15, and the reason is the whole point of this file.
+# What shipped wrong was three overlapping leaves at 50% of --card-badge-h -- an 8px side the sweep
+# above cannot see, because the size is a percentage of a parent -- so the pin read the leaves' own
+# border-radius. The leaves are gone: the mark is a Lucide `layers` mask in the same scrim pill as
+# the video badge, and a mask has no corners to round. A pin whose subject no longer exists is a
+# permanently-red test, which is how a real failure beside it goes unread, so it is re-aimed at the
+# badge that IS there. Same guarantee either way: the set mark's corners stay inside the cap.
 # Matched unscoped: the badge stopped being `.card .set-badge` on 2026-09-04, when the detail
 # view's filmstrip started using the same component rather than going without a set mark.
-leaves = re.search(r'(?<![\w.-])\.set-badge::before[^{]*\{([^}]*)\}', CSS)
-check('the set icon\'s leaves use --radius-2xs (they are 8px, so 4px would be a circle)',
-      bool(leaves) and 'var(--radius-2xs)' in leaves.group(1),
-      'the leaves are width/height 50% of --card-badge-h; anything above 2px stops them reading as cards')
-
-for sel, human in [(r'\.card \.motion-badge', 'the play/video badge'),
+for sel, human in [(r'\n\.set-badge', 'the set badge'),
+                   (r'\.card \.motion-badge', 'the play/video badge'),
                    (r'\.facet-sortbtn', 'the facet sort button')]:
     m = re.search(sel + r'\s*\{([^}]*)\}', CSS)
     body = m.group(1) if m else ''

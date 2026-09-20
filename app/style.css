@@ -96,7 +96,7 @@
      THE RULE, and it is enforced by tests/test_radius_cap.py: a mark 16px or under takes at most a
      QUARTER of its shortest side. Pick the step that satisfies it — 4px at 16px, 2px at 8px — or
      say --radius-pill when a lozenge is the actual intent. */
-  --radius-2xs: 2px;          /* ~8px marks: the set icon's leaves */
+  --radius-2xs: 2px;          /* marks of ~12px and under: the label row's colour swatch */
   --radius-xs: 4px;           /* ~16px marks: card corner badges, swatches */
   --radius-sm: 6px;           /* chips, and marks from ~24px up */
   --radius-field: 8px;        /* inputs, selects, buttons, panels, textareas */
@@ -205,12 +205,72 @@
      NEUTRAL rather than accent-tinted: a blue halo is close to what "selected" means elsewhere, and
      a grid full of them would compete with the one card actually selected. */
   --card-lift: light-dark(rgba(18,32,56,.20), rgba(255,255,255,.13));
+  /* THE ONE ROLLOVER. Every control in the app answers the pointer by going one step more present
+     and doing nothing else -- see "Pointing at something" in DESIGN.md. Before this there were
+     four rollovers, and which one a control got was decided by what ELEMENT it happened to be: a
+     global `button:hover { border-color: accent }` reached every <button> and no <select>, so
+     File type lit blue and Sort did not, while .icon-btn cancelled it and filled solid accent
+     instead. The author, 2026-09-18: "why should the filetype rollover get a blue outline, when
+     the sort drop down gets none?" There was no answer; that is why this is one token.
+     ACCENT IS NOT A HOVER. It now means focus, open, or on -- three things it was already saying
+     alongside "you are pointing at this", which is why none of them read as a system.
+
+     MIXED FROM --fg, so a custom theme brings its own and the two halves move in opposite
+     directions for free: a step up out of --bg3 on dark, a step down into it on light. That is
+     what "more present" looks like on each.
+
+     AN OVERLAY, NOT A COLOUR -- 2026-09-20, and this is the change that made "one rollover" true
+     instead of aspirational. It used to be `color-mix(--bg3, --fg 12%)`: an ABSOLUTE colour that
+     reads as a lift only when the thing under the pointer happens to be sitting on --bg3. Twenty
+     controls do not: they rest at `transparent` -- facet rows, tag rows, library buttons, popmenu
+     items, the brand button -- and each had been given whichever surface token looked right in
+     that one place. 85 hover rules, six of which used this one.
+     The worst of it was not inconsistency but direction. A facet row lives in a DROPDOWN, whose
+     ground is --bg3, and its hover was --bg2: darker in the dark theme and lighter in the light
+     one. The same gesture moved opposite ways depending on the theme, which nobody chose.
+     Translucent ink composites over whatever is beneath, so a transparent row growing a ground and
+     a drawn control lifting off its own are the same operation, and there is no per-place decision
+     left to get wrong. Measured: the step holds within 0.08 on dark and 0.01 on light across all
+     four surfaces, where the old value was correct on exactly one.
+     THE PERCENTAGES ARE THE AUTHOR'S, seen side by side at three strengths on 2026-09-20 and
+     picked by eye: he chose 15% / 11%, a step louder than the 12% / 9% that would have matched
+     the old value on --bg3.
+     DARK CAME BACK DOWN TO 13% the same day, and for a measured reason rather than a second
+     opinion: this ink lifts the filmstrip's ground, and --strip-lift is what the strip item's
+     accent hover ring is read against. At 15% that ring measured 3.04:1 against 1.4.11's 3.0 --
+     passing with nothing left, so any later nudge to that ground would have failed it silently.
+     13% puts it at 3.23:1. His call, stated as keeping the margin. Light is untouched at 11%; it
+     was never close (3.62:1).
+     light-dark() rather than a THEME_LIGHT entry, like the --card-* pairs below and for the same
+     reason: it resolves against color-scheme, which applyTheme already sets from the effective
+     --bg, so a custom theme picks the right side with no list to keep in step. A THEME_LIGHT
+     value could not have done it anyway -- that map holds plain hex, and this is a mix. */
+  --hover-lift: light-dark(color-mix(in srgb, var(--fg) 11%, transparent),
+                           color-mix(in srgb, var(--fg) 13%, transparent));
+  /* THE FILMSTRIP USED TO OWN THIS VALUE, under --strip-lift, because a strip item lives in an
+     overflow-y:hidden scroller and cannot cast --card-lift past its own edges -- the glow would be
+     clipped flat top and bottom. It lightens its own GROUND instead. That is the same job every
+     other control now does, so it shares the token rather than holding a second copy of it; the
+     name kept, because .strip-item:hover reads better naming what it is than what it equals. */
+  --strip-lift: var(--hover-lift);
   --card-scrim:        light-dark(rgba(255,255,255,.74), rgba(0,0,0,.6));
   --card-scrim-soft:   light-dark(rgba(255,255,255,.55), rgba(0,0,0,.4));
   --card-scrim-strong: light-dark(rgba(255,255,255,.86), rgba(0,0,0,.78));
   --card-ink:          light-dark(#2a2f36, #ffffff);
   --card-edge:         light-dark(rgba(0,0,0,.6),  rgba(255,255,255,.85));
-  --card-edge-soft:    light-dark(rgba(0,0,0,.38), rgba(255,255,255,.5));
+  /* THE UNFAVOURITED STAR, and it is ABSOLUTE for exactly the reason --star is: this mark's home is
+     the corner of a PICTURE, and a picture is not themed. Themed, it was
+     light-dark(rgba(0,0,0,.38), rgba(255,255,255,.5)) -- and on dark, over a pale thumbnail, a
+     half-transparent white stroke composites to white ON white. 1:1. The author lost one on
+     2026-09-16; the light half had the same fault mirrored, over a dark thumbnail, waiting.
+     NO SINGLE COLOUR SURVIVES AN ARBITRARY PICTURE, which is the whole finding. A stroke is
+     invisible against anything its own value, so the mark has to be TWO-TONE -- a light glyph with
+     a dark rim, the same construction the gold star was given on 2026-09-15 and for the same
+     reason. This is 1.4.11's answer too: the boundary carries the contrast.
+     OPAQUE, and that is load-bearing rather than tidy: drop-shadow multiplies the SOURCE alpha, so
+     a glyph at .5 would have produced a rim at half strength -- the fix quietly undoing itself. */
+  --card-edge-soft:    rgba(255,255,255,.92);
+  --card-edge-rim:     rgba(0,0,0,.8);
   --scrim: rgba(0,0,0,.6);          /* card control backgrounds (zoom, score, badge) */
   --scrim-strong: rgba(0,0,0,.78);  /* full overlays (detail bg, caption gradient) */
   --scrim-dim: light-dark(rgba(255,255,255,.66), rgba(0,0,0,.5));      /* nav / close buttons, over the picture */
@@ -434,7 +494,41 @@ input, select, button {
 }
 input:focus, select:focus { border-color: var(--accent); }
 button { cursor: pointer; }
-button:hover:not(:disabled) { border-color: var(--accent); }
+/* THE ROLLOVER, for every button that does not state its own. --hover-lift, never the accent: see
+   the token. This rule used to read `border-color: var(--accent)` and it was the single biggest
+   source of the inconsistency, because a bare element selector reaches every <button> in the app
+   and no <select> at all -- so which controls lit up blue was decided by markup rather than by
+   design, and two dropdowns sitting one above the other in the rail answered the pointer in two
+   different ways.
+   KEPT AT LOW SPECIFICITY ON PURPOSE (0,2,1), so that it is a DEFAULT and not a decree. Every
+   component with a hover of its own -- .popmenu button, .lib-stat, .detail-actions .da-btn, the
+   segmented controls, .danger -- already outranks it and is therefore untouched by this change.
+   The first draft of this rule carried :not(.primary):not(.danger):not(.active), which pushed it
+   to (0,4,1) and quietly took over the menus and the Libraries strip as well: adding exclusions to
+   a base rule RAISES its specificity, which is the opposite of what excluding things should do.
+   The one casualty of the low form is .primary, whose own hover was a bare `filter:` with no
+   background: it now states its fill outright, below, rather than relying on nothing overriding
+   it. */
+button:hover:not(:disabled) {
+  background-color: var(--hover-lift);
+  border-color: var(--border-control);
+}
+/* 120ms, the duration the rail's quiet fields already used, extended to every control rather than
+   left to the three that happened to have it. COLOUR ONLY -- nothing moves, so a row of controls
+   cannot reflow under a sweeping pointer. The author asked for it: "can you add a quick easing to
+   the onset of hover? to make it feel a bit more polished". */
+button, input, select, .facet-trigger, .facet-row, .taglist .tagrow, .rootlist .rootrow, .librow,
+.label-row, .miner-row, .popmenu button, .strip-item, .strip-item .strip-song {
+  transition: background-color .12s ease-out, border-color .12s ease-out, color .12s ease-out;
+}
+/* A preference, not a severity threshold: 120ms of colour is mild and it is still motion someone
+   has asked not to have. Paired with the reduced-motion work the image fade and filmstrip glide
+   still need. */
+@media (prefers-reduced-motion: reduce) {
+  button, input, select, .facet-trigger, .facet-row, .taglist .tagrow, .rootlist .rootrow, .librow,
+  .label-row, .miner-row, .popmenu button, .strip-item, .strip-item .strip-song,
+  #resetFilters, .card { transition: none; }
+}
 button:disabled { opacity: .4; cursor: default; }   /* global: disabled buttons must LOOK disabled */
 /* small-button size modifier — canonical compact button metrics */
 /* Button system — standalone classes on <button>. Emphasis: .primary / .secondary /
@@ -558,6 +652,21 @@ button.secondary { background: var(--bg3); border-color: var(--border-control); 
    what governs the fade-OUT, since that's the state being transitioned to. */
 .pane-busy.hidden { opacity: 0; pointer-events: none; transition: opacity 0.4s ease-out; }
 .pane-busy.slow .spinner { opacity: 1; }
+/* THE SAME WORKING TIER, scoped to a tab pane. Same recipe as the results pane -- scrim at once,
+   spinner on escalation -- because it is the same state, and the rail's own overlay could not do
+   this job: it covers the whole rail INCLUDING the tab strip, and it has no spinner by design (a
+   cold start used to show its small ring and then hand over to the big one, reading as two
+   spinners in a row).
+   --tabpane-top is the bottom of the tab strip, measured in JS the way sizeTagList already
+   measures its own offset: the strip's height depends on the font and the badges, so a constant
+   here would be a wrong number the first time either changed. */
+.tab-busy {
+  position: absolute; left:0; right:0; bottom:0; top: var(--tabpane-top, 0px);
+  z-index: 25;   /* over the pane's controls, under .task-scrim (50) and the detail view */
+}
+/* Card-sized is right in the results pane and absurd in a 370px rail, where it would reach the
+   edges and read as a ring around the sidebar rather than a spinner in it. */
+.tab-busy .spinner { width: min(72px, 30%); border-width: 3px; }
 #sidebar > .full,
 #sidebar > .tabpane > .full { grid-column: 1 / -1; }   /* headers, chips, tag list, actions (also inside a tab pane) */
 #sidebar > .ctl-label,
@@ -625,7 +734,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 #sidebar .brand .brand-btn { flex: 0 0 auto; width: 30px; height: var(--brand-btn-h); padding:0; display: flex;
   align-items: center; justify-content: center; background: transparent; border: none;
   border-radius: var(--radius-sm); color: var(--muted); cursor: pointer; }
-#sidebar .brand .brand-btn:hover { background: var(--bg3); color: var(--fg); }
+#sidebar .brand .brand-btn:hover { background: var(--hover-lift); color: var(--fg); }
 #sidebar .brand .brand-btn svg { width: var(--glyph-sm); height: var(--glyph-sm); }
 #sidebar .brand #btnHelp { margin-left:auto; }   /* push help + gear to the right edge */
 /* ---- the update mark ---------------------------------------------------------------------------
@@ -697,7 +806,9 @@ body.resizing { cursor: col-resize; user-select: none; }
    one would silently get the wrong size. This is the modifier DESIGN.md's ".icon-btn" note means. */
 .icon-btn.at-field { width: var(--field-h); height: var(--field-h); }
 .icon-btn svg { width: var(--glyph-sm); height: var(--glyph-sm); }
-.icon-btn:hover:not(:disabled) { background: var(--accent-fill); color: var(--on-accent); border-color: transparent; }
+/* The shared rollover, not a fill. This was a full --accent-fill, i.e. the exact weight the app
+   uses for SELECTED -- so pointing at the + or the dice made them look switched on. */
+.icon-btn:hover:not(:disabled) { background: var(--hover-lift); color: var(--fg); border-color: var(--border-control); }
 .icon-btn:disabled { opacity: .5; cursor: default; }
 /* ---- #resetFilters: the rail's MASTER CONTROL, and the one sanctioned skin exception -----------
    This is the only icon button whose ENABLED state is itself information: it means "something in
@@ -776,11 +887,28 @@ body.resizing { cursor: col-resize; user-select: none; }
   background-color: var(--accent-fill); color: var(--on-accent);
   border-color: var(--on-accent);
 }
+/* THE ONE CONTROL THAT KEEPS AN OFF-BRAND HOVER, and it is allowed to: the halo is the point of
+   it, and the author asked for the effect to stay -- "I did want that to have a unique 'off brand'
+   effect, but please dial it back."
+   DIALLED BACK TWICE ON 2026-09-18. First 16px/1px spread/70% -> 8px/50%, which was better and
+   still wrong: "still a bit soft or weird."
+   THE SECOND PASS TOOK THE RING OUT, and that is what the "weird" was. The button already draws a
+   white border; a 1px accent ring immediately outside it made THREE edges stacked on one control --
+   white line, blue line, then blur. Two mechanisms for one job is the shape this app avoids, and
+   the author has named it before, on the card marks: "Why a line AND a bg color?" So: one soft
+   halo, 6px at 55%, sitting directly against the white border it already has.
+   THE TRANSITION HAS TO NAME box-shadow, which is why it is restated here rather than inherited
+   from the shared `button` rule above. That rule fades colour only, on purpose -- so as soon as it
+   existed, this button's fill eased in over 120ms while its halo appeared instantly, and a glow
+   arriving ahead of the thing it belongs to is what made an unchanged 16px read as enormous. */
+#resetFilters {
+  transition: background-color .12s ease-out, border-color .12s ease-out,
+              color .12s ease-out, box-shadow .12s ease-out;
+}
 #resetFilters:not(:disabled):hover {
   background-color: color-mix(in srgb, var(--on-accent) 18%, var(--accent-fill));
   color: var(--on-accent); border-color: var(--on-accent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-fill) 45%, transparent),
-              0 0 16px 1px color-mix(in srgb, var(--accent-fill) 70%, transparent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent-fill) 55%, transparent);
 }
 /* active-filter highlight (green): selects, search boxes, score ranges, and checked tag rows.
    These keep the green box-shadow RING; their border-color halves are re-asserted by the quiet
@@ -852,6 +980,39 @@ body.resizing { cursor: col-resize; user-select: none; }
    is ignored the highlight stays the browser's own and that is where it ends: there is no styling
    left to try, only a custom dropdown, which is not worth it for a colour. */
 #sort option:checked { background-color: var(--accent-fill); color: var(--on-accent); }
+/* THE POPUP'S GROUND, 2026-09-20. Reported: the Sort and Model type lists open WHITE in the dark
+   theme. Not the theme failing to apply -- the page, the body and every <select> all compute
+   `color-scheme: dark`, and the muted separators above prove the browser is honouring `color` on
+   an option. What nothing was setting is the option's BACKGROUND, and a rail field is
+   `background: transparent` by design (a quiet control draws nothing until it is doing something),
+   so the list had no ground to inherit and fell back to the UA's white.
+   That is also why Settings' dropdowns looked right and the rail's did not: those sit on an opaque
+   --bg3 and these do not. Four controls, one cause -- Sort, Model type, and Quality's min/max.
+   EVERY select, not just the rail's, so the two halves cannot drift again; the opaque ones were
+   only correct by accident.
+   :checked and :disabled above are both (1,1,1) and outrank this (0,0,2), so the highlight and the
+   dimmed separators keep their own colours.
+   HONESTLY UNVERIFIED FROM THIS END: a native popup is an OS widget, so it appears in no
+   screenshot and no DOM read -- the note above records two earlier attempts at this popup being
+   refused outright. If this one is ignored too, the next step is a custom dropdown, which is a
+   large thing to build for a colour. */
+/* --bg3, NOT --bg2, and for two reasons that agree. It is the surface every other menu in the app
+   already uses (.panel, .taglist, .loras-list, .popmenu all sit on --bg3), so a dropdown list is
+   the same kind of thing wearing the same colour. And it is what the FIELD ITSELF goes to on
+   focus, so the popup's ground and the control it hangs off are now one value -- any frame in
+   between them is no longer a change of colour. --bg2 was my pick and it was the panel colour,
+   which is a different surface from a menu. */
+select option { background-color: var(--bg3); color: var(--fg); }
+/* AND THE FOCUSED SELECT LANDS INSTANTLY, which is the other half of the same bug. Reported after
+   the rule above fixed the colour: "there seems to be a quick flash before it settles."
+   Clicking a quiet field FOCUSES it, and focus takes it from `transparent` to --bg3 -- through the
+   120ms background ease added on 2026-09-18 for hover. The popup opens on the click, not at the
+   end of that fade, so it takes its ground from a background still on its way there and settles as
+   the transition lands. The flash is the ease, watched from inside the popup.
+   Only selects open a popup, so only selects need this, and only while focused: the hover ease
+   that was asked for is untouched. A focus state arriving instantly is right on its own terms
+   anyway -- nothing else in the app fades its focus in. */
+select:focus { transition: none; }
 /* DRAWN. Quality's min/max and each date row carry their state on the WRAPPER (markActiveFilters
    targets .score-range, not the controls inside it) — and min/max are one control, so hovering or
    setting either half draws both. The open state has no class of its own: openFacetDD() only
@@ -862,6 +1023,15 @@ body.resizing { cursor: col-resize; user-select: none; }
   background-color: var(--bg3);
   border-color: var(--border-control);
 }
+/* HOVER GOES ONE STEP FURTHER THAN THE OTHER FOUR STATES, and only in its GROUND. A quiet field
+   appearing at --bg3 is what "this control exists" looks like; --hover-lift on top of it is what
+   "you are pointing at it" looks like, and the same step every other control in the app now makes.
+   Equal specificity to the rule above and declared after, so the background wins.
+   BACKGROUND ONLY, deliberately. The two rules below colour this same edge green for a filter that
+   is set and accent for focus; setting border-color here as well would repaint both of those the
+   moment the pointer crossed, i.e. hovering a live filter would hide that it was live. */
+#sidebar .quiet-field:hover,
+#sidebar .score-range:hover > .quiet-field { background-color: var(--hover-lift); }
 /* Equal specificity, declared last, so the coloured edges beat the neutral one. Focus beats active:
    where the keyboard is matters more than what the filter is doing. */
 #sidebar .quiet-field.active,
@@ -922,7 +1092,10 @@ body.resizing { cursor: col-resize; user-select: none; }
      hover = the field appears (neutral)   ·   accent = focus or open
    Scoped to the Snapshots row rather than deleted, because #snapTrigger is NOT quiet — it is a
    drawn field whatever its state, so without this it would have no hover feedback at all. */
-#snapTrigger:hover { border-color: var(--accent); }
+/* Snapshots is a DRAWN field -- always there, because it heads the rail -- so it cannot do what a
+   quiet field does and appear. It takes the shared rollover instead. It used to light its edge
+   accent, which contradicted the split described two comments up: accent is focus or open. */
+#snapTrigger:hover { background: var(--hover-lift); border-color: var(--border-control); }
 .facet-trigger.active { border-color: var(--active); box-shadow: 0 0 0 1px var(--active); }
 .facet-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .facet-sortbtn {
@@ -1125,7 +1298,7 @@ body.resizing { cursor: col-resize; user-select: none; }
   display: flex; align-items: center; gap:var(--space-2); cursor: pointer;
   padding:var(--space-1) var(--space-2); border-radius: var(--radius-sm); font-size: var(--text-base);
 }
-.facet-row:hover { background: var(--bg2); }
+.facet-row:hover { background: var(--hover-lift); }
 .facet-row.sel { outline: 1px solid var(--active); outline-offset: -1px; }
 .facet-row .fname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .facet-row .fcount { color: var(--muted); font-size: var(--text-xs); flex: 0 0 auto; }
@@ -1300,7 +1473,11 @@ button.done { --ico: var(--icon-check); }
 .qclear:hover { color: var(--fg); border-color: transparent; }
 .qclear.hidden { display: none; }
 /* cap label — small uppercase field label, shared by sidebar / detail / settings */
-.ctl-label, .field-head, .prompt-field > summary, .set-row > label {
+/* `.set-inline > label` joined the list 2026-09-19: a label sharing a line with its control sits
+   INSIDE the flex wrapper, so the direct-child rule above it missed, and one label rendered in
+   sentence case beside a column of uppercase ones. Extended rather than given a rule of its own —
+   the spec is meant to be the same everywhere a field is named. */
+.ctl-label, .field-head, .prompt-field > summary, .set-row > label, .set-inline > label {
   font-size: var(--text-sm); text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
 }
 .ctl-label { margin:var(--space-2) var(--space-half) var(--space-half); }
@@ -1332,13 +1509,22 @@ button.done { --ico: var(--icon-check); }
   display: flex; align-items: center; gap:var(--space-2); cursor: pointer;
   padding:var(--space-1) var(--space-2); border-radius: var(--radius-sm); font-size: var(--text-base); user-select: none;
 }
-.taglist .tagrow:hover { background: var(--bg2); }
+.taglist .tagrow:hover { background: var(--hover-lift); }
 /* NB: #sidebar-scoped so it beats the global `#sidebar input { width:100% }` (ID specificity) */
 #sidebar .taglist input[type="checkbox"] { width: auto; margin:0; flex: 0 0 auto; accent-color: var(--accent); cursor: pointer; }
 .taglist .tname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A ::before rather than .has-ico, because .tname is the row's ellipsis container — making it a flex
    box to hold an icon would take truncation with it. An inline-block mark lives inside the text flow
    and truncates with it, which is what a label wants. */
+/* The ticked-tag chips. NO NEW COMPONENT: the row is .chips-row and the button is the system's
+   own .tertiary.btn-sm -- these two rules only place them. Clear is pushed to the far edge so the
+   action sits apart from the things it acts on; when the row wraps it rides the last line. */
+.tagchips { align-items: center; }
+#tagChipsClear { margin-left: auto; }
+/* :empty can't collapse a row that always holds the Clear button, so the row hides itself when
+   nothing is ticked -- the same "no stray gap" rule .chips-row:empty exists for. */
+.tagchips.is-empty { display: none; }
+
 .taglist .tagrow.fav .tname { color: var(--tag-fav); }
 .taglist .tagrow.fav .tname::before {
   content: ''; display: inline-block; vertical-align: -1px;
@@ -1348,6 +1534,13 @@ button.done { --ico: var(--icon-check); }
           mask: var(--icon-star-on) center / contain no-repeat;
 }
 .taglist .tcount { color: var(--muted); font-style: normal; font-size: var(--text-xs); flex: 0 0 auto; }
+
+/* NUMBERS THAT NO LONGER DESCRIBE THE CURRENT FILTER, while the new ones are being fetched. Only
+   the COUNTS fade, never the tag names: the names are still right, and dimming the whole list would
+   read as "this list is unavailable" when it is merely out of date. Applied after the same delay
+   the grid waits before admitting to any work, so a quick refresh shows nothing at all. */
+.taglist.stale .tcount, .label-list.stale .lcount { opacity: .35; }
+.taglist .tcount, .label-list .lcount { transition: opacity .12s linear; }
 .taglist .tagdel {
   background: transparent; border: none; color: var(--muted); opacity: 0;
   cursor: pointer; padding:0 var(--space-half); font-size: var(--text-lg); line-height: 1; flex: 0 0 auto;
@@ -1365,7 +1558,7 @@ button.done { --ico: var(--icon-check); }
   display: flex; align-items: center; gap:var(--space-2); cursor: pointer;
   padding:var(--space-1) var(--space-2); border-radius: var(--radius-sm); font-size: var(--text-base); user-select: none;
 }
-.rootlist .rootrow:hover { background: var(--bg2); }
+.rootlist .rootrow:hover { background: var(--hover-lift); }
 .rootlist .rootrow:has(input:checked) { outline: 1px solid var(--active); outline-offset: -1px; }
 #sidebar .rootlist input[type="checkbox"] { width: auto; margin:0; flex: 0 0 auto; accent-color: var(--accent); cursor: pointer; }
 .rootlist .tname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1498,7 +1691,7 @@ button.done { --ico: var(--icon-check); }
 /* The hover reveal is scoped to BUTTONS. The count is a readout, and giving it the --bg3 hover
    would be the same lie the quiet fields were built to stop telling. */
 button.lib-stat { cursor: pointer; }
-button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
+button.lib-stat:hover { background-color: var(--hover-lift); color: var(--fg); }
 /* Open reads structurally, exactly like the quiet fields: opening only un-hides the panel, there is
    no open class. BACKGROUND ONLY — a colour here would grey out a green scope while the panel is
    open, since this selector (1,3,0) outranks the state rules below. */
@@ -1638,7 +1831,7 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
    a --bg3 hover paints nothing. These two rows carried the rail's colour, where the strip sits on
    --sidebar-bg and lightening to --bg3 is correct. Moving a control into a panel changes which
    direction its hover has to go. */
-#libPanel .lib-more:hover { background: var(--bg2); color: var(--fg); }
+#libPanel .lib-more:hover { background: var(--hover-lift); color: var(--fg); }
 /* --modified, the SAME amber the strip's rolled-up mark takes when a library goes dirty: one glyph
    and one colour for "new files pending", whichever scope you read it at. It was --active (green)
    and had been dead the whole time — `.popmenu button { color: var(--fg) }` is (0,2,0) and beat the
@@ -1656,11 +1849,11 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
    files, a rotate to re-read what is already here. Two colours would have made the shapes
    decorative. */
 #libPanel .lib-catchup, #libPanel .lib-catchup:hover { color: var(--modified); }
-#libPanel .lib-catchup:hover { background: var(--bg2); }
+#libPanel .lib-catchup:hover { background: var(--hover-lift); }
 /* This one had NO visible hover at all: its colour is deliberately pinned to --modified in both
    states (above), so the background was carrying the whole effect — and it was painting --bg3 onto
    --bg3. */
-#libPanel .lib-ref:hover { background: var(--bg2); }
+#libPanel .lib-ref:hover { background: var(--hover-lift); }
 #libPanel .linklike:hover { background: transparent; }
 /* Libraries list rows (checkbox + name + count + ↻ + ⋯) — plain rows; the panel is the box now.
    Taller than the old 30vh because it floats over the grid instead of pushing the rail down. */
@@ -1669,7 +1862,7 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
   display: flex; align-items: center; gap:var(--space-2);
   padding:var(--space-1) var(--space-2); border-radius: var(--radius-sm); font-size: var(--text-base);
 }
-.librow:hover { background: var(--bg2); }
+.librow:hover { background: var(--hover-lift); }
 .librow .lib-miss { color: var(--danger); font-size: var(--text-xs); }
 .lib-ref, .lib-catchup, .lib-more {
   flex: 0 0 auto; background: transparent; border: none; color: var(--muted);
@@ -1684,7 +1877,7 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
    the identical failure .lib-dd's display:flex fixed in the strip. */
 .lib-ref svg, .lib-catchup svg { width: var(--glyph-sm); height: var(--glyph-sm); display: block; }
 .lib-more { font-size: var(--text-lg); letter-spacing: 1px; }
-.lib-ref:hover, .lib-catchup:hover, .lib-more:hover { color: var(--fg); background: var(--bg3); }
+.lib-ref:hover, .lib-catchup:hover, .lib-more:hover { color: var(--fg); background: var(--hover-lift); }
 .lib-catchup.busy { pointer-events: none; }
 .lib-catchup.busy svg { animation: cv-pulse 0.7s ease-in-out infinite; }
 /* QUIET-tier: the mark pulses while its scan is in flight (see .lib-refall.busy for why it isn't a
@@ -1802,6 +1995,15 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
 .card .star svg { width: var(--card-badge-h); height: var(--card-badge-h); }
 
 /* favorite — top right */
+/* --star-rim IS NOT SET HERE, so the idle star takes the filter's `transparent` default and carries
+   ONE soft shadow. It was set to --card-edge-rim after v1.1 shipped, to stop a white star vanishing
+   over a pale thumbnail -- a real fault, and the author had lost one. But a hard 80%-black rim
+   composited under the soft 90%-black drop below it reads as a smudge that is on ALL the time, and
+   he found it by comparing against the release he was testing: "there is NO way it was all fuzzy
+   and black on just card rollover."
+   Reverted to what 1.1 draws. THE PALE-THUMBNAIL CASE COMES BACK WITH IT and is on the list; it
+   needs an edge that is crisp rather than a second blur, which is a different change from putting
+   one back. .card .star.on still sets --star-rim to --star-edge, so the gold keeps its rim. */
 .card .star { right:var(--space-2); color: var(--card-edge-soft); }
 /* No badge scrim, unlike its neighbours on the left: this one carries a drop shadow instead, so a
    pale outline stays legible over a bright thumbnail without putting a filled box in the corner of
@@ -1833,6 +2035,11 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
    click not having taken: The author, 2026-08-28, "the star turns white until I release the mouse. just
    make it yellow." Same guard .mark-toggle and .copy-ic already carry; the card was the one place
    missing it. */
+/* ABSOLUTE like the resting colour above, and no longer --card-edge: that token is themed and is
+   still right for the two controls it borders, but on this mark it would have put the hover BACK on
+   the axis the resting state just came off -- pointing at a star over a pale thumbnail in the dark
+   theme would have taken it from .92 white to .85 white, i.e. from legible to gone. It goes to
+   solid white; the rim is unchanged and keeps carrying the edge. */
 .card .star:not(.on):hover { color: var(--card-edge); }
 /* AND THE GOLD STATE GETS ITS OWN STEP. Scoping the hover off .on stopped it painting white, and
    left it ignoring the pointer entirely -- which this note's own rule calls out: a mark that does
@@ -1841,6 +2048,36 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
    own hue -- the same color-mix(--on-accent into the fill) at the same 18% that .icon-seg
    button.active:hover uses for exactly this problem. */
 .card .star.on:hover { color: color-mix(in srgb, var(--on-accent) 18%, var(--star)); }
+/* ---- THE ACCENT RING: the one place a hover is allowed to be the accent -------------------------
+   A STATED EXCEPTION TO "ACCENT IS NEVER A HOVER", taken by the author on 2026-09-20 after seeing
+   six candidates side by side on pale and dark thumbnails. Recorded here and in DESIGN.md so it
+   reads as a decision rather than the drift that rule was written to stop.
+   WHY THE RULE DOES NOT REACH HERE. Every other hover in the app is "one step more present" off a
+   SURFACE, and the token that does it is ink mixed from --fg. A card mark has no surface -- it sits
+   on a photograph, which may be white or nearly black -- so ink derived from the text colour is a
+   black wash on a dark thumbnail. That failure is on the record: it is one of the eight attempts
+   reverted on 2026-09-18, and I reproduced it in the mockup by hardcoding the disc dark instead of
+   theming it, which moved the failure from dark THEMES to dark PICTURES rather than removing it.
+   Measured against a pale and a dark thumbnail: a dark disc steps x4.55 / x1.12 (nothing on dark),
+   mid-grey x1.83 / x2.23, mid-grey at 85% x2.70 / x3.53, and this ring x2.74 / x5.41. It is the
+   only treatment here that is strong on both grounds, because the accent owes nothing to either.
+   ON THE EDGE, NEVER AS A FILL. An accent FILL is what SELECTED already is on a card
+   (.card.selected .check), so a hover wearing it would preview a state instead of reporting a
+   pointer -- also one of the reverted rounds. An OUTLINE, not a border: it paints inside the box
+   that already exists, so nothing reflows as the pointer crosses a grid of sixty cards.
+   The colour brighten above stays. Two changes for one state is normally the thing to avoid, but
+   that pair is what he looked at and approved, and the brighten is what carries the mark itself
+   while the ring carries its box. */
+/* BOTH STATES NAMED EXPLICITLY, never a bare `.card .star:hover`. The ring is wanted on the gold
+   star as much as the plain one, so a bare selector would have been shorter and would have worked
+   -- and test_fav_toggle.js rejected it, correctly. That guard exists because `.card .star.on` and
+   a bare `.card .star:hover` are both (0,3,0), so the later one wins outright: in August that took
+   a favourited star pale under the pointer and read as the click not registering. This rule only
+   sets an outline today and would not have stolen the colour, but the guard pins the SHAPE rather
+   than the symptom, which is the only version of it that survives the next edit. */
+.card .star:not(.on):hover, .card .star.on:hover {
+  border-radius: 50%; outline: 2px solid var(--accent); outline-offset: -2px;
+}
 /* The Hidden mark's badge and the .ghost skin for a hidden card lived here until 2026-09-08. */
 /* ---- .mark-toggle: the detail title row's curation marks ------------------------------------
    ONE COMPONENT FOR BOTH, and that is the point of it. This was .fav-toggle, a class with exactly
@@ -1874,7 +2111,7 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
    governing constraint here is that these read as the same family as the bar below. Scoped off .on
    so hovering an already-marked image does not drag its colour back to grey. .detail-meta sits on
    --bg2, so the lift is to --bg3: a hover value is not portable between surfaces. */
-.mark-toggle:not(.on):hover { background: var(--bg3); color: var(--fg); }
+.mark-toggle:not(.on):hover { background: var(--hover-lift); color: var(--fg); }
 
 /* Outline vs FILLED, not ☆ vs ★. The two characters were separate glyphs whose shapes only roughly
    matched, so the toggle changed silhouette as well as state; one path drawn two ways cannot. It is
@@ -1936,7 +2173,10 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
    accent wash, on gets a lift — the same four shades as the auto-refresh toggle. */
 .icon-seg button { display: flex; align-items: center; justify-content: center; color: var(--fg); }
 .icon-seg button svg { width: var(--glyph-sm); height: var(--glyph-sm); }
-.icon-seg button:hover:not(.active) { background: color-mix(in srgb, var(--accent) 20%, var(--bg3)); }
+/* The shared rollover. A 20% accent wash here was the app's third different answer to the pointer,
+   and on File type it arrived ON TOP of the global button rule's accent border, so one control
+   got two blue changes at once. */
+.icon-seg button:hover:not(.active) { background: var(--hover-lift); }
 /* .size-seg is in this selector too, and was not until 2026-08-28. The two share every other rule
    -- including the .active fill on line above -- so an active size button was the one segment in
    the app that went dead under the pointer. Twins that disagree on one state is the fault the
@@ -2068,6 +2308,21 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
      enough to sit under an 8px inset, so nothing else had to know it was there. The moment the band
      grew to hold a word, that silent agreement broke in three places at once. */
   --card-bottom-inset: var(--space-2);
+  /* A TRANSPARENT RING AT REST, so the hover ring has something to fade FROM. The hover rule
+     below paints the same 2px at the same -2px offset in accent; with nothing declared here
+     the browser has no start value for the outline and the ring can only pop into existence.
+     An outline never affects layout, and a transparent one paints nothing, so this costs the
+     resting card exactly nothing. .card.selected's 3px still wins -- it is (0,2,0) to this
+     rule's (0,1,0) -- and a click is not a sweep, so that width change snapping is right. */
+  outline: 2px solid transparent; outline-offset: -2px;
+  /* The author: the card borders "feel abrupt". Everything else got the 120ms fade with the
+     shared rollover; the card missed it because that rule lists <button>, <input> and the
+     rail's rows, and a card is an <a>.
+     THE SHADOW IS IN HERE TOO and is the one line worth watching for cost: it is a 16px blur,
+     and fading it repaints one card for 120ms. One, not the grid -- only the card under the
+     pointer changes, so a sweep across a wall of thumbnails animates a single element at a
+     time and scroll is untouched. */
+  transition: border-color .12s ease-out, outline-color .12s ease-out, box-shadow .12s ease-out;
 }
 .card { --card-label-h: var(--card-badge-h); }
 .card:has(.label-strip) { --card-bottom-inset: calc(var(--card-label-h) + var(--space-1)); }
@@ -2124,13 +2379,37 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
   position: absolute; inset: 0; width: 100%; height: 100%;
   opacity: 0; z-index: 2; object-fit: cover; pointer-events: auto;
 }
-.card .song-head { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; }
-.card .song-heading { min-width: 0; flex: 1; }   /* min-width:0 or the title refuses to ellipsis */
-/* Cover art rides ALONGSIDE the text rather than behind it, so the drawn card keeps full control
-   of its own contrast — text never lands on an unpredictable picture. Square, because cover art
-   is, and cropped rather than letterboxed so a row of them lines up. */
+/* THE ART ON TOP, THE WORDS UNDER IT, AT EVERY CARD SIZE. This was a row with the art inset beside
+   the title, and the column was a Small-card exception that Large later grew its own copy of --
+   three spellings of one layout, and Medium left behind on the old one looking meanest of all.
+   The author, 2026-09-18: "Audio/music still seems a bit small in terms of thumbnail... make the
+   cover image larger even at small sizes."
+   min-height:0 here as well as on the art: a flex item will not shrink below its content without
+   it, and the art's own shrink stops dead one level up if this row refuses to give. */
+.card .song-head {
+  display: flex; flex-direction: column; align-items: center;
+  gap: var(--space-2); min-width: 0; min-height: 0;
+}
+.card .song-heading { min-width: 0; flex: none; width: 100%; text-align: center; }
+/* Cover art sits ABOVE the text, never behind it, so the drawn card keeps full control of its own
+   contrast — text never lands on an unpredictable picture. Square, because cover art is, and
+   cropped rather than letterboxed so a row of them lines up.
+   IT STAYS INSET, and that is the point rather than a limitation. The author, asked whether it
+   should fill the card: "I think it is GOOD to make it inset, so it still reads differently than
+   reg images." A song is a drawn card that happens to have a picture on it, and the margin is what
+   says so at a glance across a mixed grid.
+
+   A SHARE OF THE FACE, ALLOWED TO GIVE WAY. `cqw` is the face's content box — the card minus its
+   side padding — so these read a few points under the share of the CARD anyone would quote. The
+   trap this shape exists for: the art is a percentage while everything it shares the card with is
+   fixed pixels (the corner-mark insets, the title, the waveform, the facts band on a big card), so
+   a share that fits a stretched card overflows the same card at its nominal width. In a column flex
+   the basis is the HEIGHT, `aspect-ratio` keeps it square as it yields, and `object-fit: cover`
+   means yielding crops instead of distorting. Checked by measurement across card widths, not by
+   arithmetic here — see the note on the Large rules below. */
 .card .song-cover {
-  width: 44px; height: 44px; flex: none; object-fit: cover;
+  flex: 0 1 55cqw; width: auto; height: auto; max-width: 55cqw;
+  aspect-ratio: 1; min-height: 0; object-fit: cover;
   border-radius: var(--radius-sm); background: var(--bg);
 }
 .card .song-title {
@@ -2148,42 +2427,122 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
    NOTE the widths are the face's CONTENT box — card size minus its padding — so they read ~24px
    below the card size they correspond to. Measured wrong once: 190px here hid the genre on the
    DEFAULT 192px card, whose content box is 168. */
-@container (max-width: 130px) {          /* S card (128) — title only */
+/* S AND M TOGETHER: no facts band under the card at these sizes, so the FACE carries the small
+   print and the rows it can afford are fewer. Medium had no block of its own and fell through to
+   the base rules, which is how it ended up the meanest of the four — a 44px inset beside a
+   two-line title, on a card with 144px of height going spare.
+   WITH ART, THE ART REPLACES THE WAVEFORM here. Both fit only by taking the art back down to the
+   size this change exists to get away from, and at these widths the art identifies the track and a
+   20px scribble does not. Above Large there is room for both and both are drawn. */
+@container (max-width: 199px) {
+  .card .song-sub { display: none; }
+  .card .song-title { -webkit-line-clamp: 2; }
+  .card .song-face.has-cover .song-title { -webkit-line-clamp: 1; }
+  .card .song-face.has-cover .song-wave { display: none; }
+  .card .song-cover { flex-basis: 59cqw; max-width: 59cqw; }
+  /* No art: the waveform takes the room the art would have had, which is what it is for. */
+  .card .song-face:not(.has-cover) .song-wave { height: 56px; }
+}
+@container (max-width: 130px) {          /* S card (128) — the tightest budget of the four */
   /* Horizontal padding tightens; the vertical stays --space-6, because the corner marks are the
      same 16px on every card size and are what that inset is reserving. */
   .card .song-face { gap: var(--space-1); padding: var(--space-6) var(--space-2); }
-  .card .song-title { -webkit-line-clamp: 3; font-size: var(--text-xs); }
-  .card .song-sub, .card .song-wave { display: none; }
-  /* At this size the art beside two words of title leaves room for neither, so it takes the row
-     on its own and the title sits under it.
-     THE SIZES HERE ARE A BUDGET, not a taste. An S card is 128px with --space-6 reserved top and
-     bottom for the corner marks, so the block has 80px. With art that is 40 + 4 + 28 (two lines at
-     11px) = 72, which fits — but only once the facts row goes: 40+4+28+4+14 came to 90, and a
-     centred block taller than its box overflows BOTH ends, putting the art under the hide mark.
-     Measured twice, wrong the first time for exactly that missing 18px. At this size the art
-     identifies the song better than "0:19 · 87 bpm" does, so the art is what stays. */
-  .card .song-head { flex-direction: column; align-items: center; }
-  .card .song-cover { width: 40px; height: 40px; }
-  .card .song-face.has-cover .song-title { -webkit-line-clamp: 2; }
+  .card .song-title { font-size: var(--text-xs); }
+  /* THE SIZES HERE ARE A BUDGET, not a taste. An S card is 128px with --space-6 reserved top and
+     bottom for the corner marks, so the block has 80px — and every row competes for it. The art
+     used to take 40px of that, a quarter of the card, which is what made a song read as an almost
+     empty card beside a photograph that filled its own.
+     WHAT BUYS THE BIGGER ART IS THE SECOND TITLE LINE. 40 + 4 + 28 (two lines at 11px) = 72 fits;
+     one line instead frees 14px and the art takes it, landing near 60% of the face. A title that
+     needs two lines at this size was being read off a 128px card anyway.
+     The art is a shrinkable share (see the base rule), so this is a REQUEST, not an assertion: if a
+     particular width cannot seat it the art gives way instead of pushing the block past the corner
+     marks — which is the failure this budget was got wrong twice for, in both directions. */
+  .card .song-cover { flex-basis: 62cqw; max-width: 62cqw; }
   .card .song-face.has-cover .song-facts { display: none; }
-  .card .song-heading { flex: none; width: 100%; text-align: center; }
+  /* THE WAVEFORM SURVIVES WHEN THERE IS NO ART, and it used to go at this size whatever the card
+     held — which left a coverless track as a title on an empty ground, nothing saying it was audio
+     but the corner mark. The author: "we drop the waveform for music with no image card on the
+     small thumbnail size. Can we keep the waveform when there is no image, and just shrink it?"
+     It fits: two title lines (28) + wave (20) + the facts row (14) is 62 of the 80. */
+  .card .song-face:not(.has-cover) .song-wave { height: 20px; }
 }
 @container (min-width: 200px) {          /* L card (256) upward */
   .card .song-wave { height: 40px; }
-  .card .song-cover { width: 56px; height: 56px; }
 }
 @container (min-width: 300px) {          /* XL card (512) — room to read */
   .card .song-title { font-size: var(--text-md); }
   .card .song-sub, .card .song-facts { font-size: var(--text-sm); }
   .card .song-wave { height: 56px; }
-  .card .song-cover { width: 88px; height: 88px; }
 }
+
+/* ---- Songs on Large and Extra-large cards: the cover leads, the band carries the small print ---
+   KEYED ON THE GRID CLASS, NOT A CONTAINER QUERY, and that is deliberate. Everything above sizes
+   itself from the face's own width, which is right for type and spacing. These rules are different:
+   they exist because .card-facts is showing, and .card-facts is switched on by .grid.cards-lg. Two
+   thresholds that must agree have to BE one threshold -- the discrete card sizes happen to make the
+   container query agree today, and that is luck, not a guarantee.
+
+   The author, 2026-09-18, putting a track beside an image from the same grid: "the music cards don't
+   align with the image cards... Unclear why audio/music cards don't behave the same." And on the
+   art: "I feel the cover image should be larger - maybe centered above the waveform. If no cover,
+   then sure, waveform can be primary." */
+
+/* HOW MUCH ROOM THE BAND NEEDS, as arithmetic over the tokens it is actually built from, so it
+   follows if any of them move. Three parts: where the band's bottom edge sits (a song always
+   carries the music mark in .card-bl, so it always takes the one-badge step), plus the band's own
+   HOVER height -- two rows, not one. Reserving the resting height instead would look right until
+   you pointed at a card, which is the moment the second row appears over the waveform. */
+.grid.cards-lg .card:has(.song-face) {
+  --song-band-clear: calc(
+    var(--card-bottom-inset) + var(--card-badge-h) + var(--space-1)     /* the band's bottom edge */
+    + 2 * (var(--text-xs) * 1.3) + 2 * var(--space-half));              /* two rows + its padding */
+}
+.grid.cards-lg .card .song-face { padding-bottom: var(--song-band-clear); }
+
+/* A SMALLER SHARE THAN THE SIZES BELOW, and it looks backwards until you count what else is in the
+   box: Large is the first size with a facts band under the card, and clearing that band costs ~65px
+   where Small pays only its 24px corner-mark inset. The art asks for less here because it is
+   sharing with more.
+   `cqw` is the FACE's content box, so 50cqw measures ~46% of the CARD at Large and 60cqw ~57% at
+   Extra-large. The percentages in these rules are the face's; the numbers anyone quotes are the
+   card's. Worth saying once, since the two differ by enough to make a later reading look wrong.
+   WHY THE SHARE HAS TO BE ABLE TO YIELD, measured rather than reasoned: at the nominal 256 a fixed
+   half overflowed the box by ~7px, straight down behind the band, while the same rule looked right
+   on every stretched card. Cards fill the row, so which width you get is the window's business. */
+.grid.cards-lg .card .song-cover { flex-basis: 50cqw; max-width: 50cqw; }
+/* A Large card has ~167px of content once the band is cleared, and cover + title + waveform fills
+   it. The genre line is what goes: the tint already carries the genre, and the waveform is the row
+   that separates one track from another. Both come back at Extra-large, which has room to spare. */
+.grid.cards-lg .card .song-sub { display: none; }
+.grid.cards-lg .card .song-title { -webkit-line-clamp: 1; }
+.grid.cards-lg .card .song-wave { height: 27px; }
+/* The face's own facts row is the band's job now. Hidden here rather than dropped in songFaceHTML
+   because Small and Medium have no band and still need it -- so duration prints exactly once at
+   every card size, from a different place at each. */
+.grid.cards-lg .card .song-facts { display: none; }
+
+.grid.cards-xl .card .song-cover { flex-basis: 60cqw; max-width: 60cqw; }
+.grid.cards-xl .card .song-sub { display: block; }
+.grid.cards-xl .card .song-title { -webkit-line-clamp: 2; }
+.grid.cards-xl .card .song-wave { height: 42px; }
+
+/* NO COVER ART: the waveform is the card. The author's own framing -- "If no cover, then sure,
+   waveform can be primary" -- and .has-cover already exists to ask the question. Nothing else
+   moves: the title stays above it and the band below it. */
+.grid.cards-lg .card .song-face:not(.has-cover) .song-wave { height: 96px; }
+.grid.cards-xl .card .song-face:not(.has-cover) .song-wave { height: 200px; }
 /* The hover filename caption is a one-line overlay pinned near the top of the card, and a song's
-   title is a centred two-line block — they collide at S and M, which is most of the time. The face
-   names the song itself, so the caption stays off. NOTE this leaves takes of one song looking
-   alike on the grid: they share a name by design and the filename timestamp is what separates
-   them, so if that needs to be visible it belongs IN the face, not in this overlay. */
-.card:has(.song-face) .cap { display: none; }
+   title is a centred two-line block — they collide at S and M, where the block fills the card.
+   The face names the song itself, so the caption stays off THERE.
+   IT IS ON AT LARGE AND UP, since 2026-09-18. The note that used to live here spelled out the cost
+   and then left it standing: takes of one song look alike on the grid, they share a name by design,
+   and the filename timestamp is the only thing separating them. The author hit exactly that. No
+   layout reservation is needed to fix it — .cap is absolutely positioned and fades in on hover, so
+   at Large it lands on the cover art the same way it lands on a photograph, which is the whole
+   point of the parity. The collision it was written for is gone anyway once the art, not the title,
+   is what sits at the top of the block. */
+.grid:not(.cards-lg) .card:has(.song-face) .cap { display: none; }
 
 /* ---- Song, detail view ------------------------------------------------------------------------
    Same face, at reading size, with a transport and the words. The hero is capped rather than
@@ -2426,7 +2785,7 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
   width: 100%; text-align: left; font-size: var(--text-base); line-height: 1.3; color: var(--fg); cursor: pointer;
   padding:var(--space-2) var(--space-2); border: none; background: transparent; border-radius: var(--radius-sm);
 }
-.popmenu button:hover:not(:disabled) { background: var(--bg2); }
+.popmenu button:hover:not(:disabled) { background: var(--hover-lift); }
 .popmenu button:disabled { opacity: .4; cursor: default; }
 .popmenu button.danger { color: var(--danger); }
 /* Box, top and centring come from the shared top-row rule beside the star — this adds only what
@@ -2457,7 +2816,10 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
    is two changes and a state preview where every other control in the app moves one thing. The box
    is over a photograph, so the step is on the scrim rather than to --bg3 the way the rail's controls
    do — same idea, a surface that works where it sits. */
-.card .check:hover { background: var(--card-scrim); }
+/* The scrim one step darker, PLUS the accent edge -- see the ring on the star above for why
+   the accent is allowed here and nowhere else. The box already draws a 2px border, so the
+   edge is a colour change on something that exists rather than a second mechanism. */
+.card .check:hover { background: var(--card-scrim); border-color: var(--accent); }
 .card.selected img { filter: brightness(.82); }
 
 /* reusable confirm/alert/prompt dialog (styled to match the app) */
@@ -2531,7 +2893,7 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
 .answer-text.is-error { color: var(--muted); font-style: italic; }
 /* The row that is being worked on, so a slow model looks like progress rather than a stall. */
 .answer-row.is-waiting .answer-text { color: var(--muted); }
-.miner-row:hover { background: var(--bg3); }
+.miner-row:hover { background: var(--hover-lift); }
 .miner-row.applied { opacity: .6; cursor: default; }
 .miner-row.applied:hover { background: none; }
 .mr-applied { font-size: var(--text-xs); font-weight: 600; color: var(--success); white-space: nowrap; }
@@ -2561,7 +2923,9 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
   font-size: var(--text-xs); padding:var(--space-half) var(--space-2); border-radius: var(--radius-sm); white-space: nowrap; flex: 0 0 auto;
   background: var(--bg3); border: 1px solid var(--border-control); color: var(--fg); cursor: pointer;
 }
-.mini-btn:hover:not(:disabled) { background: var(--accent-fill); color: var(--on-accent); border-color: transparent; }
+/* The shared rollover. Its resting skin is byte-for-byte button.secondary's, so there was never a
+   reason for it to answer the pointer differently -- see DS-21 in ideas.md. */
+.mini-btn:hover:not(:disabled) { background: var(--hover-lift); color: var(--fg); border-color: var(--border-control); }
 .mini-btn:disabled { opacity: .5; cursor: default; }
 /* .auto-btn — the auto-refresh toggle — is styled ENTIRELY in the Libraries strip
    (.lib-stat.auto-btn.active / .active:hover / .active.busy), since the button stopped being an
@@ -2651,7 +3015,7 @@ button.lib-stat:hover { background-color: var(--bg3); color: var(--fg); }
 }
 /* --bg2, not --bg3: the menu's surface IS --bg3, so the bar's hover would be invisible on it.
    The surface decides the direction — see the same note on the detail view's overflow. */
-.selbar-actions #selMoreMenu button:hover:not([aria-disabled="true"]) { background: var(--bg2); }
+.selbar-actions #selMoreMenu button:hover:not([aria-disabled="true"]) { background: var(--hover-lift); }
 /* There is no global .hidden utility — every component scopes its own, or the class silently does
    nothing and the element is always visible. */
 .selbar-actions button.hidden { display: none; }
@@ -2754,8 +3118,12 @@ button.danger:hover:not(:disabled):not([aria-disabled="true"]) { background: var
    --card-badge-h, including the label band and the insets, so they all follow. */
 .grid.cards-lg { --card-badge-h: 20px; }
 .grid.cards-xl { --card-badge-h: 24px; }
-/* A song's face already draws its duration, tempo and key — the same reason .cap is off there. */
-.card:has(.song-face) .card-facts { display: none; }
+/* (A `.card:has(.song-face) .card-facts { display:none }` rule lived here, switching the band off
+   for songs entirely because the face already drew the duration. It was true of duration and of
+   nothing else — age, file size, model and folder were never on the face — so one overlapping fact
+   cost five. Removed 2026-09-18; the overlap is settled by hiding the FACE's row at the sizes the
+   band exists at, up in the song-face block. Deleted rather than left commented out, because a
+   disabled rule reads as something that might come back.) */
 /* HOVER LIFTS; SELECTION DOES NOT. The 1px border only changed COLOUR on hover, which on the light
    preset is one thin line of #2061d3 and reads as almost nothing -- the author: "I feel like a
    slightly stronger border would be good for the active/highlighted card."
@@ -2868,7 +3236,7 @@ button.danger:hover:not(:disabled):not([aria-disabled="true"]) { background: var
   display: flex; align-items: center; gap:var(--space-2); padding:var(--space-1) var(--space-2); border-radius: var(--radius-sm);
   cursor: pointer; font-size: var(--text-base); color: var(--fg);
 }
-.label-row:hover { background: var(--bg3); }
+.label-row:hover { background: var(--hover-lift); }
 /* :has(input:checked) is the checkbox form of the same state, for the Notes / Awards rows that now
    share this component — the same idiom the tag and root lists already use. Reading the DOM truth
    directly means these two need no entry in markActiveFilters(). */
@@ -3294,17 +3662,57 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
   flex: 0 0 auto; height: 100%; aspect-ratio: 1;
   position: relative; padding:0; border: none; background: var(--bg3);
   border-radius: var(--radius-sm); overflow: hidden; cursor: pointer;
+  /* Same transparent resting ring and the same fade as .card, for the reason DESIGN.md gives for
+     everything else these two share: a strip item is a card by another name. Leaving the strip
+     abrupt while the grid eased would be a new inconsistency of exactly the kind this pass exists
+     to remove. No box-shadow here -- the strip cannot cast one (see the lift note below). */
+  outline: 2px solid transparent; outline-offset: -2px;
+  transition: background-color .12s ease-out, outline-color .12s ease-out;
 }
 /* THE ITEM'S OWN GROUND, which is the rule the card states: a letterbox belongs to the thing
    holding the picture, not to the page behind it. A strip item is filled with --bg3, so its bars
    are --bg3 -- the same rule as the card, applied to a different surface, rather than the same
    VALUE copied across. */
 .strip-item img { width: 100%; height: 100%; object-fit: contain; display: block; background: var(--bg3); }
-.strip-item:hover { outline: 1px solid var(--border); outline-offset: -1px; }
 /* CURRENT is an inset outline, never a border or a margin: the strip auto-scrolls to keep this item
    in view, and anything that changes an item's box would shift every neighbour each time you press
-   an arrow — the scroll position would then chase a target that moved because of the scroll. */
-.strip-item.current { outline: 2px solid var(--accent); outline-offset: -2px; }
+   an arrow — the scroll position would then chase a target that moved because of the scroll.
+   3px, LIKE .card.selected — see the hover block below for why the two widths have to differ. */
+.strip-item.current { outline: 3px solid var(--accent); outline-offset: -3px; }
+/* HOVER LIFTS, SELECTION DOES NOT — the card's rule (DESIGN.md), now true of the strip as well.
+   IT HAD STOPPED SAYING ANYTHING. Hover used to be carried by BRIGHTNESS: every item that was not
+   .current sat at opacity .55 and hovering took it back to 1. That dimming was removed on
+   2026-09-09 at the author's request — "they seem inactive, when the selected highlight does
+   enough" — and he was right, but what was left behind was `outline: 1px solid var(--border)`, a
+   line written as a faint SUPPLEMENT to the brightness jump and never re-judged once the jump was
+   gone. On the dark theme that is #2c313a on a #23272f tile, about 1.15:1, i.e. nothing. It read in
+   the light preset only because the contrast work of 2026-09-16 took light's --border to #a7afbf,
+   so one theme's hover got stronger and the other's did not, which is how he found it: "the
+   hover/rollover in the Detail filmstrip has become too subtle".
+   THE FIX IS THE CARD'S, NOT A VALUE. The grid card had this exact complaint answered a day earlier
+   and the answer became a design-system rule; the strip shows the SAME items through the same
+   shared marks, so a second, quieter vocabulary for "you are pointing at this" is the fault. Two
+   states, separated by width AND the lift, exactly as .card.selected is separated from .card:hover.
+   SCOPED OFF .current AND PLACED AFTER IT: at equal specificity a later 2px rule would drop the
+   current item to the thinner ring the moment you pointed at it. Same source-order trap DESIGN.md
+   records against the card. A hovered current item keeps its 3px and gains the lift.
+   THE LIFT IS A GROUND, NOT A SHADOW, and that is forced: .strip-scroll is overflow-y:hidden and
+   an item is height:100% of it, so a box-shadow's glow would be clipped flat top and bottom and
+   drawn only left and right — worse than none. The item lightens its own fill instead, and its
+   img carries the same value so a letterboxed thumbnail lifts as ONE object rather than growing a
+   pale frame around the picture. Same idea as --card-lift, expressed on a surface that cannot cast
+   a shadow off itself. */
+/* THE ITEM AND EVERY FACE IT CAN WEAR, in one selector list, because a strip item is one of three
+   things: a picture on a letterbox (img), a song's drawn face (.strip-song), or the item's own fill
+   while a thumbnail is still loading. Each declares --bg3 in its own right and each covers the item
+   completely, so lifting only the button would have left a song and a loading tile flat -- which is
+   EXACTLY how the dimming this replaces was half-applied: it keyed off `img`, so a song never
+   dimmed and a mixed strip came out at two brightnesses. Fixing the cue without fixing its reach
+   would have shipped the same bug twice. */
+.strip-item:hover,
+.strip-item:hover img,
+.strip-item:hover .strip-song { background: var(--strip-lift); }
+.strip-item:hover:not(.current) { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* NO FADE ON THE ONES YOU ARE NOT LOOKING AT. Every item that was not .current sat at opacity .55,
    which the 2px accent outline above already says better — and says without making the pictures
    harder to read, which is the strip's whole job. The author: "they seem inactive, when the selected
@@ -3343,9 +3751,15 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
 }
 .strip-item .star svg {
   width: var(--glyph-sm); height: var(--glyph-sm);
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,.9));   /* same contrast trick as the card's */
+  /* THE SAME TWO SHADOWS THE CARD CARRIES, and the comment here used to CLAIM that while declaring
+     only the first. The card's star gained --star-edge, the gold's contrast rim, on 2026-09-15 and
+     this copy was not touched -- so the same mark, on the same item, was drawn two ways depending on
+     which surface you were looking at. The strip shows a star only in its .on state (it is
+     display-only here), so what was missing was exactly the rim that state depends on. Stated as
+     --star-rim rather than --star-edge so the card's mechanism reaches this surface whole. */
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.9)) drop-shadow(0 0 1px var(--star-rim, transparent));
 }
-.strip-item .star.on { opacity: 1; }
+.strip-item .star.on { opacity: 1; --star-rim: var(--star-edge); }
 .strip-item .star.on svg { fill: currentColor; }   /* FILLED, not just gold — see .card .star.on */
 .strip-item .strip-play {
   font-size: var(--text-xs); line-height: 1;
@@ -3622,7 +4036,7 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
   display: flex; align-items: center; justify-content: center;
   background: transparent; border: none; border-radius: var(--radius-field);
   color: var(--muted); cursor: pointer; }
-.detail-actions .da-btn:hover:not(:disabled) { background: var(--bg3); color: var(--fg); }
+.detail-actions .da-btn:hover:not(:disabled) { background: var(--hover-lift); color: var(--fg); }
 .detail-actions .da-btn:disabled { opacity: .5; cursor: default; }
 /* Same idle-not-disabled idiom as the selection bar: aria-disabled keeps the tooltip working, and
    here the tooltip IS the fix ("start ComfyUI"), so a real `disabled` would hide the instruction. */
@@ -3634,7 +4048,7 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
    the break to 17px against 4px. Spacing at the call site, not in the component. */
 .detail-actions .vsep { margin-inline: var(--space-1); }
 .detail-actions .da-danger { margin-left:auto; color: var(--danger); }   /* separated to the right */
-.detail-actions .da-danger:hover:not(:disabled) { background: var(--bg3); color: var(--danger); }
+.detail-actions .da-danger:hover:not(:disabled) { background: var(--hover-lift); color: var(--danger); }
 .detail-actions .da-btn.hidden { display: none; }   /* beats .detail-actions .da-btn's display:flex */
 /* #dLoupeBtn is the one action button carrying a STATE (the lens is pinned), so it takes the accent
    the same way every other "on" control here does. Its hover is re-stated because it is already
@@ -3753,7 +4167,12 @@ html:has(.detail.detail-max) { --detail-inset: 24px; }
 .actions { display: flex; flex-direction: column; gap:var(--space-2); margin-top:var(--space-4); }
 .actions button { width: 100%; white-space: nowrap; }
 button.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); font-weight: 600; }
-button.primary:hover { filter: brightness(1.08); }
+/* STATES ITS FILL, where it used to state only the filter. The shared `button:hover` default
+   sits at (0,2,1) and this rule at (0,2,0), so without the two declarations below the base
+   rule would repaint a filled primary button's ground and border grey under the pointer.
+   The appearance is unchanged: these are the same two values .primary already rests on, with
+   the brightness still doing the lightening. */
+button.primary:hover { filter: brightness(1.08); background: var(--accent-fill); border-color: var(--accent-fill); }
 button.primary.done { background: var(--success); border-color: var(--success); }
 /* push danger button to bottom to reduce accidental clicks */
 .actions .danger-bottom { order: 999; }
@@ -3775,7 +4194,7 @@ button.primary.done { background: var(--success); border-color: var(--success); 
    changes almost nothing. Same tokens, opposite context, opposite direction.
    --bg3 is what every other control on a panel does (the detail action bar, the sidebar's own
    close), so this stops being a special case as well as becoming visible. */
-.close:hover { background: var(--bg3); }
+.close:hover { background: var(--hover-lift); }
 /* The maximize toggle is a .close in every respect but its position and its mark, so it sits HERE,
    immediately after the rule it has to beat. It was first written up with the rest of the maximize
    CSS, ~500 lines earlier, and silently did nothing: `.close` and `.maxi-toggle` have the SAME
@@ -3921,7 +4340,32 @@ button.tertiary, button.ghost { background: transparent; }   /* .ghost = legacy 
 .settings-head, .help-head { display: flex; align-items: center; justify-content: space-between;
   padding:var(--space-4) var(--space-5); border-bottom: 1px solid var(--border); }
 .settings-head h2, .help-head h2 { margin:0; font-size: var(--text-xl); }
-.settings-head .close, .help-head .close { position: static; background: transparent; }
+/* IN A TITLE BAR AN ICON IS BARE, and that is true of every icon in it, not just the ✕. The rule
+   existed for .close alone, so the Help ? beside it kept .icon-btn's field skin -- a ground and a
+   1px edge -- and the two buttons in one row disagreed about whether a header icon is a control
+   you can see or one you find. The author, 2026-09-19: "the Help icon should not have a box around
+   it. Not sure why it does." Nothing in the header is competing for attention, so neither needs a
+   box to be found; the title bar is where they are.
+   Same hover as .close for the same reason: pointing at either does one thing.
+   THIS USED TO READ "not --hover-lift -- that one is a step UP from a ground, and these have
+   none", which was true of the old token and is the sentence that gave the whole round-two change
+   away: a rollover that only works for controls that already have a ground is not one rollover.
+   --hover-lift is translucent ink now and composites over nothing perfectly well, so these two
+   take it like everything else. */
+.settings-head .close, .help-head .close,
+.settings-head .icon-btn, .help-head .icon-btn {
+  position: static; background: transparent; border-color: transparent;
+}
+/* THE ✕ HAD NO ROLLOVER HERE AT ALL, and the reason is the rule above it. `.close:hover` and
+   `.settings-head .close` carry the SAME specificity, so the later one wins outright -- the header
+   override cancelled the hover rather than restyling it, and had done since it was written. Found
+   2026-09-19 while giving the ? the same treatment: measuring the ✕ to copy it is what turned up
+   that there was nothing to copy. Both are named here so neither can lose its hover to the other's
+   rule again. */
+.settings-head .close:hover, .help-head .close:hover,
+.settings-head .icon-btn:hover:not(:disabled), .help-head .icon-btn:hover:not(:disabled) {
+  background: var(--hover-lift); border-color: transparent;
+}
 .settings-head-actions { display: flex; align-items: center; gap:var(--space-2); }
 /* The version, sitting with the heading rather than centred between it and the buttons — which is
    what a third child gets from the row's space-between on its own. The auto margin takes the free
@@ -4117,7 +4561,6 @@ button.tertiary, button.ghost { background: transparent; }   /* .ghost = legacy 
 .theme-group:first-child { margin-top:0; }
 .settings-foot { display: flex; align-items: center; justify-content: space-between;
   padding:var(--space-3) var(--space-5); border-top: 1px solid var(--border); }
-.settings-foot-actions { display: flex; gap:var(--space-2); }
 .set-status { font-size: var(--text-base); color: var(--muted); }
 
 /* ---- help window ---- */

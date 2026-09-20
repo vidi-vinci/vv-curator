@@ -113,7 +113,7 @@ def ensure_thumb_sized(image_path, thumbs_dir, size=THUMB_SIZE, quality=THUMB_QU
             # it simply has a `thumb` like every other file. A song without one returns None and
             # the card draws itself instead (see app.js songFaceHTML).
             import comfy_meta                    # local: only audio needs it, and it imports late
-            data = comfy_meta.read_id3_cover(image_path)
+            data = comfy_meta.read_audio_cover(image_path)
             if not data:
                 return None, None
             with Image.open(io.BytesIO(data)) as im:

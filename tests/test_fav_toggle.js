@@ -88,7 +88,12 @@ check('the detail view checks the reply too', /r && r\.error/.test(detail), true
 //
 // Pinned as a rule-ordering fact rather than a colour, because that is what can silently come back:
 // the guard is one `:not(.on)` a future edit could drop while the stylesheet still looks right.
-const css = fs.readFileSync(path.join(__dirname, '..', 'app', 'style.css'), 'utf8');
+// COMMENTS STRIPPED FIRST, added 2026-09-20. This matched raw text, so writing the forbidden
+// selector inside a comment EXPLAINING why it is forbidden turned the guard red -- which happened
+// the first time anyone documented it next to the rule. A guard that punishes prose about itself
+// teaches people to stay quiet next to it, and the comment is the part that survives longest.
+const css = fs.readFileSync(path.join(__dirname, '..', 'app', 'style.css'), 'utf8')
+              .replace(/\/\*[\s\S]*?\*\//g, '');
 check('the card star still has its hover', css.includes('.card .star:not(.on):hover'), true);
 check('  ...and no bare hover that would outrank the gold',
       /(^|[^)])\.card \.star:hover/m.test(css), false);

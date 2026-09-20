@@ -114,7 +114,7 @@ def _make_hash_resolver():
     return resolve
 
 
-def _parameters_text(prompt, width, height, positive, negative, link_models):
+def _parameters_text(prompt, width, height, positive, negative, link_models, saver_id=None):
     """The A1111 metadata block for a run, read entirely off the executed graph.
 
     Module-level and shared: the image saver puts this in the PNG's `parameters` chunk and VV Run
@@ -123,11 +123,16 @@ def _parameters_text(prompt, width, height, positive, negative, link_models):
     omit the Size line, which is what a non-image wants -- VV Run Name has nothing to measure.
 
     There are no overrides any more. Every value here comes from the graph.
+
+    `saver_id` IS THE ONE THING THIS SIDE KNOWS AND THE VIEWER NEVER CAN. The reader finds which
+    sampler made a file by walking back from the node that saved it, and outside ComfyUI it has to
+    work out WHICH node that was from the filename and the stage. In here the node is running: it
+    knows its own id, so the walk starts from the right place with nothing inferred at all.
     """
     g = _graph(prompt)
     if not g:
         return ""
-    sid = comfy_meta._pick_sampler(g)
+    sid = comfy_meta._pick_sampler(g, saver_id=saver_id)
     params = comfy_meta.extract_gen_params(g, sid) if sid else {}
 
     raw_ckpt = (comfy_meta._resolve_model(g, sid) if sid else None) or comfy_meta._first_loader_ckpt(g)
@@ -449,7 +454,8 @@ class VVSaveImageCivitai:
                 # prevent it. Six boxes that should always be empty also read as settings you are
                 # meant to fill in. If a value comes out wrong the tracer is wrong -- fix the tracer.
             },
-            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
+            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO",
+                       "unique_id": "UNIQUE_ID"},
         }
 
     RETURN_TYPES = ("IMAGE", "STRING")
@@ -467,7 +473,7 @@ class VVSaveImageCivitai:
         "made the image. Use one per stage.")
 
     def save(self, images, stage, use_civitai_links, run_data=None,
-             stage_custom="", prompt=None, extra_pnginfo=None):
+             stage_custom="", prompt=None, extra_pnginfo=None, unique_id=None):
         # `filename_prefix` is a plain default here rather than a widget: the field was removed on
         # 2026-09-06 (see INPUT_TYPES), and this is what keeps an unwired saver behaving exactly
         # like core SaveImage instead of failing.
@@ -498,7 +504,7 @@ class VVSaveImageCivitai:
         text = ""
         try:
             text = _parameters_text(prompt, width, height, positive, negative,
-                                    use_civitai_links)
+                                    use_civitai_links, saver_id=unique_id)
         except Exception as e:                      # never lose the image over a metadata problem
             print(f"[VV] metadata build failed: {e}")
             text = ""

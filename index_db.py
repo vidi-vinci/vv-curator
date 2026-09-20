@@ -592,7 +592,19 @@ SCHEMA_VERSION = 5  # bump when the FTS layout changes (5 = index song lyrics to
 # atom, and we read only QuickTime's indexed form. Every such video reported its duration and
 # dimensions and nothing else. Bumped AGAIN rather than folded into 2, because a library
 # rescanned in the hours between the two would otherwise never be offered the second fix.
-READER_VERSION = 3
+# 4 (2026-09-17): the reader now walks BACK from the node that saved a file to find the sampler
+# that made it, instead of picking the one with the longest positive prompt. That guess reported a
+# song's settings from its cover art's sampler, and a picture's from whichever later pass gained a
+# few quality tags. Prompt, model and VAE move to the walked answer; generation settings
+# deliberately do not, that being a separate call. Bumped so a file is re-read when it is next
+# OPENED -- lazily, one at a time, never as a job that starts on its own.
+# 5 (2026-09-20): FLAC tracks read their own tags, and LoRA bundles are read whether or not they
+# are written out as text. Both landed AFTER 4 was set on the 17th, so every affected row was
+# already stamped 4 and the app would never have offered to re-read it -- a FLAC indexed before
+# this would have stayed blank in the Details pane for good, with nothing on screen suggesting a
+# rescan would help. Caught while writing the 1.2 notes, which promise the offer appears: the
+# claim is what found the gap, so the notes were doing the job a claim is supposed to do.
+READER_VERSION = 5
 
 # How many files a forced run must actually read before its speed is worth remembering. Enough to
 # level out a slow first folder, small enough that a modest library still produces a number.

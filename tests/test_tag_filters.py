@@ -13,10 +13,14 @@ had no such ability at all: /api/tags never touched the grid's filter builder, s
 work and cost real time -- measured at roughly +48ms on 110k images, and it now runs on every filter
 change rather than once at boot.
 
-A TAG DOES NOT NARROW ITSELF, the rule /api/facets already followed. `tags` and `fav` are dropped
-before the filter is built, so ticking one label leaves the other four saying what switching to them
-would give. Without it the exclusive labels would all read 0 the moment you picked one, and the list
-could no longer be used to move between them -- which is most of what it is for.
+AN EXCLUSIVE LIST DOES NOT NARROW ITSELF, the rule /api/facets already followed. Labels are one at
+a time, so the picked label is dropped before their own filter is built -- without it the other four
+read 0 the moment you pick one and the list stops being usable for moving between them. Favourites
+is the same shape.
+
+TAGS ARE NOT EXCLUSIVE, so they drop nothing: they stack, and the only question a tag answers is
+"what would adding this give", which is the intersection. Lumping them in with labels left a tag
+listed when adding it would return nothing (fixed 2026-09-18).
 
 ZERO IS NOT THE SAME EVERYWHERE, and that is the author's call rather than a consequence of the query. A
 label that matches nothing keeps its row and reads 0, because five fixed rows vanishing reads as
@@ -82,6 +86,10 @@ def build():
     tags = [(i, 'label:publish', 'user') for i in range(1, 11)]     # 1..10, of which only 1 is a video
     tags += [(i, 'favorite', 'fav') for i in range(1, 6)]           # 1..5, of which only 1 is a video
     tags += [(i, 'stills-only', 'user') for i in range(2, 6)]       # 2..5: no videos at all
+    # SPANS THE LABEL'S EDGE on purpose: 8,9,10 carry the label and 11..14 do not. A tag that sat
+    # wholly inside the label would count the same whether the label narrowed it or not, and the
+    # test would pass against the bug it exists to catch.
+    tags += [(i, 'spans', 'user') for i in range(8, 15)]            # 8..14: three inside the label
     conn.executemany("INSERT INTO tags(image_id, tag, source) VALUES(?,?,?)", tags)
     conn.commit()
     conn.close()
@@ -129,21 +137,94 @@ c, fav = counts(type='audio')
 check('nothing matches at all: the tag list is empty', c, {})
 check('  and favorites reads 0 rather than the library total', fav, 0)
 
-# ---- a tag does not narrow itself --------------------------------------------------------------
+# ---- an EXCLUSIVE list does not narrow itself --------------------------------------------------
+# Labels are one at a time, so the picked label is dropped from their own filter: without that the
+# other four read 0 the moment you pick one and the list stops being usable. Favourites is the same
+# shape. TAGS ARE NOT EXCLUSIVE and drop nothing -- see the next block.
 c, _ = counts(tags='label:publish')
 check('a ticked label still counts its whole self', c.get('label:publish'), 10)
-check('  and the other tags still show what switching would give', c.get('stills-only'), 4)
+c, fav = counts(fav='1')
+check('ticking Favorites does not narrow itself', fav, 5)
+
+# ---- a TICKED TAG narrows the list, because tags stack ------------------------------------------
+# The author, 2026-09-18: "tags need to narrow their counts - they behave inconsistently with other
+# filters." They did: picking a model narrowed every tag, ticking a tag narrowed none of them, so a
+# tag stayed listed even when adding it would return nothing.
+#
+# spans is 8..14 and stills-only is 2..5 -- they share no image at all, which is the case that
+# matters: with spans ticked, stills-only must LEAVE THE LIST rather than sit there reading 4.
+c, fav = counts(tags='spans')
+check('a tag that would add nothing drops out of the list', c.get('stills-only'), None)
+check('  ...where before it sat there reading its whole-library total', counts()[0].get('stills-only'), 4)
+check('the ticked tag itself reads the filtered total', c.get('spans'), 7)
+check('  ...and Favorites narrows with it', fav, 0)          # favourites 1..5, spans 8..14
+
+# A tag that DOES overlap stays, at the size of the overlap -- what adding it would give you.
+c, _ = counts(tags='label:publish')
+check('an overlapping tag stays, at the size of the overlap', c.get('spans'), 3)   # 8,9,10
+check('  ...and one wholly inside the filter keeps its full size', c.get('stills-only'), 4)
+
+# ---- but it DOES narrow the other lists ----------------------------------------------------------
+# The author, 2026-09-18: "I think selecting a Label is NOT filtering tags?" It was not. Labels and
+# tags share a table and one request parameter, so dropping that parameter to keep a list from
+# narrowing itself dropped the OTHER list with it. Three lists, three filters, each blind only to
+# its own selection.
+c, fav = counts(tags='label:publish')
+check('picking a label narrows the TAG counts', c.get('spans'), 3)
+check("  ...to the label's own images, not the whole library", c.get('stills-only'), 4)
+check('picking a label narrows Favorites', fav, 5)          # favourites 1..5 all carry the label
+
+c, fav = counts(tags='spans')
+check('ticking a tag narrows the LABEL counts', c.get('label:publish'), 3)
+
+# Both at once: each list still answers its own question under the other's filter.
+c, fav = counts(tags='label:publish,spans')
+check('a label AND a tag: the tag list sees both', c.get('spans'), 3)
+check('  ...the label list sees the tag but not itself', c.get('label:publish'), 3)
+check('  ...and Favorites sees both', fav, 0)
+
+# The narrowing has to agree with the grid, which is the whole point of these numbers.
+check('the grid agrees: label + that tag', grid(tags='label:publish,spans'), 3)
+
 c, _ = counts(fav='1')
-check('ticking Favorites does not narrow the label either', c.get('label:publish'), 10)
+check('ticking Favorites narrows the label count', c.get('label:publish'), 5)
+# Absent rather than 0: a tag matching nothing drops out of the list, which is the rule stated at
+# the top of this file. Only the five fixed label rows keep a zero.
+check('  ...and the tag list, whose non-matching rows drop out', c.get('spans'), None)
 
 # ---- the caller, which is the half that broke last time -----------------------------------------
 # The facet bug was app.js building a query string by hand and omitting filters. This request is
 # built the same way, so it can fail the same way, and nothing above would notice.
 src = open(os.path.join(BASE, 'app', 'app.js'), encoding='utf-8').read()
-body = src[src.index('async function loadTags'):]
-body = body[:body.index('getJSON(')]
+# The query string moved out of loadTags into tagsKey() on 2026-09-18, when the counts became lazy:
+# the same string is now also the KEY for "do these numbers still describe the current filter", so
+# a filter missing from it silently means two different things -- the wrong numbers, AND a filter
+# change that never triggers a refresh. Same check, and it matters more than it did.
+body = src[src.index('function tagsKey('):]
+body = body[:body.index('}).toString()')]
 for name in ('q:', 'model:', 'folder:', 'type:', 'meta:', 'roots:', 'after:', 'rmin:'):
-    check('loadTags still sends %s' % name.rstrip(':'), name in body, True)
+    check('the tag counts still ask with %s' % name.rstrip(':'), name in body, True)
+
+# ...and that the fetch USES that key rather than building its own string again, which is how the
+# two could drift apart and put the app back where it started.
+ft = src[src.index('async function _fetchTags'):]
+ft = ft[:ft.index('\n}')]
+check('the fetch asks with the same string it keys on', "getJSON('/api/tags?' + key)" in ft, True)
+check('  ...and caches the answer under it', 'tagCachePut(key, data)' in ft, True)
+at = src[src.index('function applyTags('):]
+at = at[:at.index('\n}')]
+check('  ...and what is on screen records which filter it describes', '_tagsKey = key' in at, True)
+
+# THE CACHE'S ONE RULE, pinned because it is the difference between a stale count and a slow one: a
+# DIRECT loadTags() means a caller knows the tags themselves changed, so every cached answer goes,
+# not only this filter's. Seven callers rely on that and none of them says so at its own site.
+lt = src[src.index('async function loadTags'):]
+lt = lt[:lt.index('async function _fetchTags')]
+check('loadTags throws away every cached answer', 'tagCacheClear()' in lt, True)
+nd = src[src.index('function tagsNeeded('):]
+nd = nd[:nd.index('\n}')]
+check('  ...and the lazy path reads the cache instead of clearing it',
+      'tagCacheGet(key)' in nd and 'tagCacheClear' not in nd, True)
 
 httpd.shutdown()
 shutil.rmtree(_tmp, ignore_errors=True)

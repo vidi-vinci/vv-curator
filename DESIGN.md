@@ -78,6 +78,74 @@ effective `--bg` — so a custom theme picks the right side for free, with no li
 This is why they are not `THEME_LIGHT` entries: nobody should be editing them, and that map takes
 plain hex rather than `rgba`.
 
+### Pointing at something
+
+**One rollover, and it is `--hover-lift`.** A control answers the pointer by going one step more
+present and doing nothing else. Never accent, never a second change alongside the first.
+
+> **`--hover-lift` is TRANSLUCENT INK, not a colour** (2026-09-20). It composites over whatever is
+> beneath, which is what makes "one rollover" true rather than aspirational: a control resting at
+> `transparent` growing a ground and a control lifting off its own are the same operation, so there
+> is no per-place decision about which surface token to name. It used to be
+> `color-mix(--bg3, --fg 12%)` — correct on `--bg3` and whatever it happened to be anywhere else —
+> and **twenty controls rest at nothing**, so each had been handed `--bg2` or `--bg3` by eye. 85
+> hover rules, six of which used the token.
+>
+> The tell that it was wrong was direction, not consistency: a facet row lives in a dropdown, whose
+> ground is `--bg3`, and its hover was `--bg2` — **darker in dark mode, lighter in light mode**.
+> Measured, the ink holds its step within 0.08 (dark) and 0.01 (light) across all four surfaces.
+> **15% dark / 11% light**, the author's pick by eye from three strengths.
+>
+> **Never name a surface token as a hover background.** `tests/test_hover_policy_css.py` fails on
+> one.
+
+| State | What it looks like |
+|---|---|
+| Resting | its own ground — or **nothing at all**, for a quiet field that is filtering nothing |
+| **Hover** | `--hover-lift`: one step off whatever it is sitting on |
+| Focus / open | the accent **edge** |
+| Filter is set | the `--active` green edge |
+| On / selected | a solid `--accent-fill` |
+| Hovered while on | that fill, lightened by `color-mix(--on-accent 18%, …)` |
+
+> **THE ONE EXCEPTION: a mark on a PICTURE takes the accent, on its edge** (author's call,
+> 2026-09-20, from six candidates seen side by side). The card's star and checkbox sit on a
+> photograph, not a surface, so the premise the ladder rests on — a ground to step off — is absent,
+> and ink mixed from `--fg` is a black wash on a dark thumbnail. That is not theory: it is one of
+> the eight rollovers reverted on 2026-09-18. Measured across a pale and a dark thumbnail, a dark
+> disc steps ×4.55 / ×1.12, mid-grey ×1.83 / ×2.23, mid-grey at 85% ×2.70 / ×3.53, and the accent
+> ring ×2.74 / ×5.41 — the only one strong on both, because the accent owes nothing to either.
+> **On the edge, as an `outline`, never as a fill**: a fill is what *selected* already is
+> (`.card.selected .check`), and an outline paints inside the existing box so nothing reflows.
+>
+> Two rules fall out of it, and they are what stops a ninth attempt:
+> **on a UI surface, ink; on a picture, the accent edge.** And **a mark resting at nothing wants a
+> ground to ARRIVE; a mark that already has one wants that ground to MOVE** — the star and the
+> checkbox need opposite treatments, which is why one candidate that looked right on the star did
+> nothing at all on the checkbox.
+
+> **Accent is never a hover** (outside that one exception). It was, in four places, and the result was that blue meant hover,
+> focus and "switched on" at once, so none of them read as a state. The author, 2026-09-18: *"why
+> should the filetype rollover get a blue outline, when the sort drop down gets none?"* — there was
+> no answer. The rollover a control got was decided by **what element it happened to be**: a bare
+> `button:hover { border-color: accent }` reaches every `<button>` and no `<select>`, so the
+> segmented bar lit blue and the select beside it did not.
+>
+> **A base rule's exclusions raise its specificity.** `button:hover` is deliberately (0,2,1) and
+> deliberately carries no `:not(.primary):not(.danger)` chain: adding those pushed it to (0,4,1)
+> and it silently took over the popmenus and the Libraries strip, which have hovers of their own.
+> The low form makes it a default that any component outranks. The one control that then needed
+> fixing was `.primary`, whose hover was a bare `filter:` with no ground of its own to defend.
+>
+> **Light needs a different percentage, not a different colour.** `--hover-lift` is mixed from
+> `--fg`, so it steps up on dark and down on light by itself. But the light preset's four surfaces
+> sit within a few points of each other, so the same 12% lands at 1.26:1 where dark reads 1.40:1.
+> Matching the *ratio* wanted 17%; 17% looked too heavy, and the author picked **9%** after seeing
+> all three. A number that matches on paper and is wrong in the eye is wrong.
+>
+> **120ms, colour only.** Background, border and text — nothing that moves, so a row of controls
+> cannot reflow under a sweeping pointer. Off under `prefers-reduced-motion`.
+
 **Hover lifts, selection does not.** A hovered card takes a 2px accent ring (an inset outline) plus
 `--card-lift`; a selected card keeps its 3px ring and no second, thinner one. What separates the two
 states is the **lift**, not one pixel of width. `--card-lift` themes only its *colour* — `light-dark()`
@@ -93,6 +161,21 @@ compete with the one card actually selected.
 > And **scope the hover ring off `.selected`**: the hover rule sits later in the file, so at equal
 > specificity a selected card under the pointer would drop to the thinner ring. Same source-order
 > trap the grid card's gold star hit in August.
+
+**The filmstrip item follows the same rule, with a different lift.** A strip item is a card by
+another name — same marks, same states — so it takes the same 2px accent hover ring, the same 3px
+ring when it is the current item, and the same `:not()` scoping and source order. What it cannot
+take is `--card-lift`: `.strip-scroll` is `overflow-y: hidden` and an item is `height: 100%` of it,
+so there are **zero pixels above or below** for a shadow to draw in and the glow would be clipped
+flat top and bottom. It lifts its own **ground** instead, `--strip-lift`, which stays inside the box
+the scroller allows. Mixed from `--fg` rather than written twice, so it steps up out of `--bg3` on
+dark and down into it on light — both away from the row's colour, which is what reads as lifted on
+either. Every face the item can wear — the `img`, `.strip-song`, the bare button while a thumbnail
+loads — declares `--bg3` in its own right and covers the item, so all three are in the selector list.
+
+> **A state cue that is a fill, not an outline, has to name every surface that can cover the box.**
+> The dimming this replaced keyed off `img` alone, so a song's drawn face never dimmed and a mixed
+> strip sat at two brightnesses. The same trap is one selector away from any `:hover { background }`.
 
 **The marks scale with the card.** `--card-badge-h` is 16px at Small and Medium, 20px on
 `.grid.cards-lg` (256) and 24px on `.grid.cards-xl` (512). It was flat at every size, so a badge
@@ -279,7 +362,7 @@ Use these. Do not invent another for the same job.
 | `.primary` `.secondary` `.tertiary` `.ghost` `.danger` `.link` on `button` | emphasis; `.btn-sm` / `.btn-lg` size; `.done` / `disabled` state | `.ghost` is a legacy alias of `.tertiary`. **Emphasis carries a WEIGHT, not just a colour**: `.primary` is 600 and `.secondary` explicitly resets to 400, so a new primary that only takes the accent background comes out looking almost right |
 | `.icon-btn` | **every** icon-only button | its 24px geometry is derived, not hardcoded — don't set a height |
 | `.chip` | removable pill: `<span class="chip"><span>label</span><button></button></span>` | solid `--accent` fill, so `--muted` text on it is unreadable |
-| `.ctl-label` / `.field-head` / `.set-row > label` | cap label — one shared 12px/.04em uppercase muted spec | `#sidebar > .ctl-label` is a direct-child rule; don't wrap it |
+| `.ctl-label` / `.field-head` / `.set-row > label` / `.set-inline > label` | cap label — one shared 12px/.04em uppercase muted spec | `#sidebar > .ctl-label` is a direct-child rule; don't wrap it. **A label on the same line as its control goes inside `.set-inline`** — a direct child of `.set-row` is a block and stacks above, which wastes a row on a one-word name. That nesting is why the fourth selector exists |
 | `.group-title` | section header (FILTERS/TAGS) | distinct from a cap label |
 | `.qenter` | the ⏎ in a search box: "press Enter to keep this" | tracks the END OF THE TEXT, not the field edge, so `left` is set from JS against a `position:relative` `.searchbox` — nothing in CSS can see where text inside an `<input>` ends. Clamped short of `.qclear`, which stays pinned right. It is a real button and commits the term: a glyph beside a live control gets clicked whatever it looks like |
 | `.dialog-choices` | the shared dialog's CHOICES mode — a confirm that asks *which*, not just whether | built by `_dlgOpen` from a `choices` array, never written into the markup: the options differ per caller and some exist only conditionally. **Checkboxes, not radios**, because the things chosen between are disjoint and "both" is a real answer. OK is disabled while nothing is ticked — a destructive action on an empty set would report success having done nothing |
@@ -294,7 +377,7 @@ Use these. Do not invent another for the same job.
 | `.inline-ico` | a control's own glyph quoted inside a sentence — "click the ⧉ icon" | the SVG is LIFTED from the live element at render time, never copied into the string; `vertical-align` keeps it out of the line box so the paragraph's leading doesn't jump |
 | `.lib-stat.nudge` | first-run state on the Libraries button: `--active` fill, `--on-accent` mark, fill-pulse | a filled state must override `button.lib-stat:hover`, which otherwise repaints it grey — this one rings, auto-refresh lightens |
 | `.popmenu` | menu surface; `.popmenu button` styles items | descendant selector — a non-item child inherits it |
-| `.icon-seg` / `.size-seg` | segmented control, exactly one `.active` | both derive from `--control-h` — `#themeSeg` scopes its WIDTH only, never its height, because one instance quietly taller is how the 26px-vs-25px drift above began. **Reach for this whenever a row of buttons is really one question**: the Appearance tab had `Dark` / `Light` / `Reset to defaults`, where Reset and Dark were the same click (dark *is* the shipped default), nothing said which theme you were on, and a user pressed Reset on a default theme, saw nothing happen and reported it broken. Three actions were two, and the state they were all describing had no name until `Custom` got one. The lit segment is derived from the colours themselves, not from the last button pressed, so a theme restored from `config.json` lights the right one with nothing having had to remember |
+| `.icon-seg` / `.size-seg` | segmented control, exactly one `.active` | both derive from `--control-h` — `#themeSeg` scopes its WIDTH only, never its height, because one instance quietly taller is how the 26px-vs-25px drift above began. **Reach for this whenever a row of buttons is really one question**: the Appearance tab had `Dark` / `Light` / `Reset to defaults`, where Reset and Dark were the same click (dark *is* the shipped default), nothing said which theme you were on, and a user pressed Reset on a default theme, saw nothing happen and reported it broken. Three actions were two, and the state they were all describing had no name until `Custom` got one. **`Custom` then had to go the same way, 2026-09-19**: a segment bar is a row of CHOICES, and Custom was a STATUS you fell into by touching a swatch — never chosen, greyed until earned, and one shared slot that a tweak on the other mode silently overwrote. Two segments now, each mode keeping its own edits, with a separate `Reset` beside the bar for the one thing a segment cannot do: clear this mode and leave you on it. **The lit segment is remembered, not derived** — an edited Dark and an edited Light are both "a set of overrides", so the colours cannot say which one the user believes they are in, and that deduction is precisely what produced Custom |
 | `.quiet-field` | a control drawn only while doing something | see the rule above |
 | `.vsep` / `.rail-sep` / `.pane-sep` | vertical / full-bleed horizontal / inset horizontal rule | `.rail-sep` cancels `--rail-pad` with a negative margin — they must agree. `.pane-sep` does not: full bleed means “section of the rail”, inset means “group within one pane” |
 | `.rail-cluster` | two or more controls pinned to the far edge of a row that wraps | The `margin-left:auto` goes on the WRAPPER, never on one of the children — a bare child's auto-margin holds only until the row is narrow enough to wrap, and then strands its neighbour on another line. Currently the Libraries strip's timer + check |

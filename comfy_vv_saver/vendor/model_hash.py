@@ -150,6 +150,9 @@ def sha256_cached(path, cache_path, progress=None, should_stop=None, extra_dbs=(
 # whole models root, which is slow and can match a same-named file in an unrelated category.
 CATEGORY_DIRS = {'checkpoints': ('checkpoints', 'diffusion_models', 'unet')}
 
+# What a model file is called on disk, for the extension-less fallback in resolve_file.
+MODEL_EXTS = {'.safetensors', '.ckpt', '.pt', '.pth', '.bin', '.sft', '.gguf'}
+
 
 def resolve_file(models_dir, category, raw_name):
     """Find the on-disk file for ComfyUI's stored `raw_name` (e.g.
@@ -174,6 +177,21 @@ def resolve_file(models_dir, category, raw_name):
         for dirpath, _dirs, files in os.walk(base):
             for fn in files:
                 if fn.lower() == target:
+                    return os.path.join(dirpath, fn)
+    # STORED WITHOUT ITS EXTENSION. ComfyUI Lora Manager records 'MyLora', not
+    # 'MyLora.safetensors', so neither join above can ever hit and the LoRA reads fine while its
+    # hash stays unresolvable -- which on Civitai is the difference between a named resource and a
+    # linked one. Only tried when the stored name carries no model extension of its own, so a real
+    # filename is never second-guessed.
+    if os.path.splitext(target)[1] in MODEL_EXTS:
+        return None
+    for base in bases:
+        if not os.path.isdir(base):
+            continue
+        for dirpath, _dirs, files in os.walk(base):
+            for fn in files:
+                stem, ext = os.path.splitext(fn.lower())
+                if stem == target and ext in MODEL_EXTS:
                     return os.path.join(dirpath, fn)
     return None
 

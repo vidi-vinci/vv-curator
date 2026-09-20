@@ -160,15 +160,23 @@ try:
 
     st, j = call('GET', '/api/config')
     keys = [r.get('key') for r in (j.get('cards') or [])]
-    check('a fresh config offers every fact', sorted(keys) == sorted(
-          ['dims', 'duration', 'age', 'filesize', 'model', 'folder']), keys)
+    # Against the WHITELIST, not a list typed out here. Two lists have to agree -- CARD_FACT_KEYS is
+    # what a save is validated against and DEFAULT_CARD_FACTS is what a fresh config is built from --
+    # and a fact added to one and forgotten in the other is the failure worth catching. Spelling the
+    # keys out a third time here only meant editing this line every time a fact was added, which is
+    # how it would come to be edited without being read.
+    check('a fresh config offers every fact',
+          sorted(keys) == sorted(server.CARD_FACT_KEYS), keys)
     check('  and advertises the defaults to the client',
           isinstance(j.get('cards_defaults'), list) and j['cards_defaults'], j.get('cards_defaults'))
 
-    # The author's own example: age before dimensions.
-    reordered = [{'key': 'age', 'place': 'always'}, {'key': 'dims', 'place': 'always'},
-                 {'key': 'duration', 'place': 'always'}, {'key': 'filesize', 'place': 'hover'},
-                 {'key': 'model', 'place': 'off'}, {'key': 'folder', 'place': 'hover'}]
+    # The author's own example: age before dimensions. Built from the default list rather than typed
+    # out, so it stays COMPLETE as facts are added -- an incomplete list would be silently topped up
+    # by the coercion and the "did the order survive" checks below would be comparing two different
+    # lengths. One placement is changed to `off` so this is unmistakably a choice, not a default.
+    reordered = [dict(r) for r in server.DEFAULT_CARD_FACTS]
+    reordered.insert(0, reordered.pop(next(i for i, r in enumerate(reordered) if r['key'] == 'age')))
+    next(r for r in reordered if r['key'] == 'model')['place'] = 'off'
     st, j = call('POST', '/api/settings', {'cards': reordered})
     check('a new order is accepted', st == 200, st)
     check('  and echoed back', [r['key'] for r in j.get('cards', [])] ==
@@ -196,8 +204,7 @@ try:
     got = [r['key'] for r in j.get('cards', [])]
     check('an unknown key is dropped', 'nonesuch' not in got, got)
     check('a duplicate is dropped', got.count('age') == 1, got)
-    check('and every missing fact is appended', sorted(got) == sorted(
-          ['dims', 'duration', 'age', 'filesize', 'model', 'folder']), got)
+    check('and every missing fact is appended', sorted(got) == sorted(server.CARD_FACT_KEYS), got)
     check('  with the one that was sent kept FIRST, i.e. the order survives', got[0] == 'age', got)
 
     # A DEFAULT THAT HAS BEEN WRITTEN DOWN STOPS BEING A DEFAULT, and this pair is the fix.
@@ -233,6 +240,27 @@ try:
     check('  but the same order with a placement changed IS a choice, and is kept',
           up.get('cards') is not None
           and next(r['place'] for r in up['cards'] if r['key'] == 'age') == 'off', up.get('cards'))
+
+    # A SAVED CHOICE STILL PICKS UP A FACT ADDED SINCE. `up` is what the server loaded from the
+    # six-key choice written above -- a config from a build that had never heard of the new facts,
+    # which is every config in the field the day one is added. Without the append, whoever had
+    # touched Settings -> Cards even once would be pinned to that day's list and a new fact would be
+    # invisible to them until they re-opened a page they had no reason to open. Found 2026-09-18
+    # adding `bpm` and `key`; the author's own config is a six-key order, so it would have been his.
+    #
+    # Asserted on load_config rather than on the GET, because load is where the append happens --
+    # testing it one layer further out would pass with the guarantee moved anywhere upstream.
+    loaded = [r['key'] for r in (up.get('cards') or [])]
+    check('a saved choice is still offered every fact added since',
+          sorted(loaded) == sorted(server.CARD_FACT_KEYS), loaded)
+    check('  with the choice itself untouched at the front',
+          loaded[:len(old_cfg['cards'])] == [r['key'] for r in old_cfg['cards']], loaded)
+    check('  and each new fact arriving at its shipped placement',
+          all(next(r['place'] for r in up['cards'] if r['key'] == d['key']) == d['place']
+              for d in server.DEFAULT_CARD_FACTS if d['key'] not in
+              {r['key'] for r in old_cfg['cards']}), up.get('cards'))
+    check('  while nothing was rewritten to disk for it',
+          cards_on_disk() == old_cfg['cards'], cards_on_disk())
 
     # A junk placement must land somewhere real rather than being stored raw and drawn as nothing.
     st, j = call('POST', '/api/settings', {'cards': [{'key': 'age', 'place': 'sideways'}]})

@@ -141,9 +141,9 @@ The viewer works fine without it. It has [its own README](comfy_vv_saver/README.
 ## More
 
 [About](ABOUT.md) is what it's for and whether it's for you. [Help](docs/help.md) — the app's own
-**?** — holds keys, defaults and gotchas, and is authoritative for behaviour;
-[Decisions](docs/decisions.md) covers why it is the way it is, and [DESIGN.md](DESIGN.md) the token
-and component system. Behavioural limits are listed under [Known gaps](docs/help.md#known-gaps) —
+**?** — holds keys, defaults and gotchas, and is authoritative for behaviour, and
+[DESIGN.md](DESIGN.md) covers the token and component system.
+Behavioural limits are listed under [Known gaps](docs/help.md#known-gaps) —
 chiefly that a video's prompt often can't be read from the file, and WebM carries none.
 
 `python tests/run_all.py` runs the tests in about a minute; each file's docstring says what it pins

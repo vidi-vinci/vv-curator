@@ -342,6 +342,11 @@
            viewport bar is one body. Note the rail's other two dividers pass the same test that
            deleted this one: .rail-sep has a snapshot's whole payload below it and nothing above,
            and the viewport bar's own line has grid size and back-to-top, which aren't captured. -->
+      <!-- WORKING tier for the tab panes. Absolutely positioned, so it takes no grid cell; it
+           covers everything BELOW the tab strip and deliberately not the strip itself, because
+           switching tab is the one thing still worth doing while the numbers load. -->
+      <div id="tabBusy" class="pane-busy tab-busy hidden" role="status" aria-live="polite"
+           aria-label="Loading"><span class="spinner"></span></div>
       <div class="filter-tabs full">
         <button class="ftab active" type="button" data-tab="filters">Filters<span class="ftab-badge hidden">0</span></button>
         <button class="ftab" type="button" data-tab="labels">Labels<span class="ftab-badge hidden">0</span></button>
@@ -416,6 +421,31 @@
         <button type="button" data-type="audio" title="Songs" aria-label="Songs" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="18" r="3" /> <circle cx="18" cy="16" r="3" /> <path d="M9 18V5l12-2v13" /></svg></button>
       </div>
 
+      <!-- Aspect, directly under File type: both answer "what is this card", and a four-way icon-seg
+           is the control this pane already uses for exactly that question. Songs carry no
+           dimensions, so they fall out of every choice but All — correct rather than a gap, since a
+           song has no shape. The glyphs are plain rectangles in the three proportions; nothing in
+           the vendored set says "portrait" better than a tall box does.
+           THE "ALL" SEGMENT DOES NOT BORROW THE FILES GLYPH its two neighbours use, and the author is why:
+           "the 'any' icon we use in Filetype and Sets sits weirdly near other buttons where the shape
+           IS what you select." Exactly -- in those bars every option names a KIND, so a documents
+           mark meaning "all kinds" belongs; here the other three options are the answer drawn at
+           size, which makes a documents mark the only glyph in the row that is not a picture of
+           itself. It takes Lucide `ratio` instead, a tall and a wide rectangle crossed, which is the
+           standard mark for this and stays in the rectangle family. It is TWO shapes where
+           DESIGN.md asks for one silhouette at 15px; that was put to him with the alternative (a
+           single dashed rectangle) drawn beside it at real size, and this is the one he picked.
+           CALLED ASPECT, NOT SHAPE. The author, 2026-09-16: "shape is just an odd word. implies the answer
+           could be 'circle'." Right -- the options are proportions of a rectangle, and "shape" opens
+           a category they are not in. Aspect is also what the word is in every tool that has this. -->
+      <label class="ctl-label" title="Filter by the proportions of the picture. Square allows a little tolerance, so an upscale that landed a pixel off still counts">Aspect</label>
+      <div id="aspect" class="icon-seg at-default" role="group" aria-label="Aspect">
+        <button type="button" data-aspect="" title="All" aria-label="All aspects" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2" /> <rect x="2" y="7" width="20" height="10" rx="2" /></svg></button>
+        <button type="button" data-aspect="portrait" title="Portrait" aria-label="Portrait only" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="12" height="18" rx="2" /></svg></button>
+        <button type="button" data-aspect="landscape" title="Landscape" aria-label="Landscape only" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2" /></svg></button>
+        <button type="button" data-aspect="square" title="Square" aria-label="Square only" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" /></svg></button>
+      </div>
+
       <label class="ctl-label" title="Collapse sets into one card — video sets (a still+video sharing a filename) and/or image sets (stills from one generation, e.g. …1 MAIN / 2 DET / 3 REFINE)">Sets</label>
       <div id="setsMode" class="icon-seg at-default" role="group" aria-label="Sets">
         <button type="button" data-mode="all" title="All" aria-label="All" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2h-4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8" /> <path d="M16.706 2.706A2.4 2.4 0 0 0 15 2v5a1 1 0 0 0 1 1h5a2.4 2.4 0 0 0-.706-1.706z" /> <path d="M5 7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 1.732-1" /></svg></button>
@@ -468,6 +498,14 @@
       <div class="tabpane" data-pane="tags">
         <div class="tags-box full">
           <input id="tagSearch" type="text" placeholder="search, or type + Enter to tag selection" autocomplete="off">
+          <!-- WHICH TAGS ARE TICKED, said at the top. The list runs to hundreds of rows, so a tick
+               made near the bottom left nothing on screen to say you had made it -- and several
+               ticks left nothing to say which. Ordinary .chip and an ordinary tertiary button; the
+               row collapses to nothing when empty (.chips-row:empty), so it costs no space until
+               there is something to say. -->
+          <div id="tagChips" class="chips-row tagchips full">
+            <button type="button" id="tagChipsClear" class="tertiary btn-sm">Clear</button>
+          </div>
           <div id="taglist" class="taglist"></div>
         </div>
       </div>
@@ -863,21 +901,36 @@
             <div class="set-row">
               <label>Theme</label>
               <div class="set-inline">
-                <!-- STATES, not three actions. "Dark" and "Reset to defaults" used to be the same
-                     click -- both cleared every override, and since dark IS the shipped default the
-                     two were one button wearing two labels. Exactly one segment is true of your
-                     colours at any moment, and Custom is the one the old row could not say. -->
+                <!-- TWO MODES, EACH CARRYING ITS OWN EDITS, and nothing else in this row. There
+                     was a third segment, Custom: it named a status rather than a theme -- you did
+                     not pick it, you fell into it by touching a swatch, and it was greyed until
+                     you had -- and both modes shared one slot, silently overwritten. Reset used to
+                     sit here too, which put an ACTION in a row of STATES; it belongs with the
+                     colours it acts on. The author, 2026-09-19: "the UI is still confusing." -->
                 <div id="themeSeg" class="size-seg" role="group" aria-label="Theme">
                   <button type="button" data-theme="dark">Dark</button>
                   <button type="button" data-theme="light">Light</button>
-                  <button type="button" data-theme="custom" title="Colors you set yourself">Custom</button>
                 </div>
               </div>
             </div>
             <div class="set-row">
               <label>Colors</label>
-              <p class="set-help">Live preview as you edit. <b>Save</b> keeps your theme; closing without
-                saving discards changes. Colors are stored per install (config.json).</p>
+              <p class="set-help">Click a color swatch to customize it. Reset restores the mode.</p>
+              <!-- A LABELLED ROW OF ITS OWN, at the head of the group it acts on rather than at the
+                   foot, so it is not behind twenty swatches when you want it. Enabled only when
+                   this mode has been changed, so it can never discard nothing -- and that state is
+                   the tab's only answer to "have I customized this one?". -->
+              <div class="set-row">
+                <!-- The label sits INSIDE .set-inline so the two read as one line, "Customized
+                     [Reset]". A label that is a direct child of .set-row is a block and would
+                     stack above the button, wasting a row on one word; the type is the shared
+                     cap-label either way, so this needs no rule of its own. -->
+                <div class="set-inline">
+                  <label>Customized</label>
+                  <button type="button" id="themeReset" class="tertiary btn-sm"
+                          title="Put this mode's colors back to their defaults">Reset</button>
+                </div>
+              </div>
               <div id="themeRows" class="theme-rows"></div>
             </div>
           </section>
@@ -906,12 +959,11 @@
           </section>
         </div>
       </div>
+      <!-- NO SAVE BUTTON. Every control here writes when you touch it; this strip is where the
+           window says so. aria-live so the confirmation reaches a screen reader, which otherwise
+           gets no signal at all that anything happened. -->
       <div class="settings-foot">
-        <span id="setStatus" class="set-status"></span>
-        <span class="settings-foot-actions">
-          <button id="setSave" class="primary">Save</button>
-          <button id="settingsCancel" class="ghost">Cancel</button>
-        </span>
+        <span id="setStatus" class="set-status" role="status" aria-live="polite"></span>
       </div>
     </div>
   </div>

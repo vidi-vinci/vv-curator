@@ -33,6 +33,13 @@ ROOT = os.path.dirname(HERE)
 CSS = io.open(os.path.join(ROOT, 'app', 'style.css'), encoding='utf-8').read()
 JS = io.open(os.path.join(ROOT, 'app', 'app.js'), encoding='utf-8').read()
 
+# THE STYLESHEET WITH ITS PROSE REMOVED, and this exists because the bare-substring form of these
+# checks failed OPEN on 2026-09-18. `'.card:has(.song-face) .card-facts' in CSS` was asserting that
+# songs are exempt from the band; the rule was deleted that day and the check still passed, because
+# the comment left in its place NAMES the selector it is explaining. A guard that reads comments is
+# not reading the stylesheet. Every structural check below searches this instead.
+CSS_RULES = re.sub(r'/\*.*?\*/', '', CSS, flags=re.S)
+
 failures = []
 
 
@@ -222,8 +229,78 @@ check('  ...and comes back on hover', bool(show_hover) and 'display: flex' in sh
 if hide_empty and show_hover:
     check('  ...with the hover rule LAST, or it never wins', show_hover.start() > hide_empty.start())
 
-check('a song face suppresses the band', '.card:has(.song-face) .card-facts' in CSS)
-check('  ...as it already does the filename caption', '.card:has(.song-face) .cap' in CSS)
+# ---- 4b. a song card carries the band, and prints its duration exactly once ---------------------
+# Until 2026-09-18 a song was exempt from the band entirely, because the drawn face already showed
+# the duration. That was true of duration and of nothing else: age, file size, model and folder were
+# never on the face, so one overlapping fact suppressed four that had no overlap at all. The author,
+# putting a track beside an image from the same grid: "the music cards don't align with the image
+# cards... Unclear why audio/music cards don't behave the same."
+#
+# The exemption is gone. What replaces it is a HANDOVER, and these checks pin both ends of it: the
+# band shows at Large and up, and that is exactly where the face's own .song-facts row stands down.
+# Get one side without the other and the duration either prints twice or not at all.
+check('the blanket song exemption is gone',
+      '.card:has(.song-face) .card-facts' not in CSS_RULES)
+song_facts = re.search(r'\.grid\.cards-lg \.card \.song-facts\s*\{([^{}]*)\}', CSS_RULES)
+check('the face\'s own facts row stands down where the band appears',
+      bool(song_facts) and 'display: none' in song_facts.group(1),
+      song_facts and song_facts.group(1))
+# The two sides of the handover must name the SAME threshold. They were a container query and a grid
+# class for a while, which agreed only because the card sizes are discrete -- luck, not a guarantee.
+check('  ...gated on the same class the band is', '.grid.cards-lg .card .card-facts' in CSS_RULES)
+
+# The filename caption is the other half of the parity, and it is scoped rather than deleted: at
+# Small and Medium the centred title fills the card and the two collide, which is what the original
+# rule was for.
+cap_rule = re.search(r'\.grid:not\(\.cards-lg\) \.card:has\(\.song-face\) \.cap\s*\{([^{}]*)\}', CSS_RULES)
+check('the caption is off on song cards BELOW Large',
+      bool(cap_rule) and 'display: none' in cap_rule.group(1), cap_rule and cap_rule.group(1))
+check('  ...and therefore on at Large and above',
+      '.card:has(.song-face) .cap' not in CSS_RULES.replace(':not(.cards-lg) ', ' ')
+      or cap_rule is not None)
+
+# THE COVER MUST BE ABLE TO GIVE WAY. It is sized as a share of the card while everything it shares
+# the card with -- the top inset, the band clearance, the title, the waveform -- is fixed pixels. On
+# a wide card that overhead is a small slice and the share fits; at the nominal 256 the same ~89px is
+# more than a third of the box, and a fixed `width: 50cqw; height: 50cqw` overflowed it by ~7px,
+# straight down behind the band. Cards are stretched to fill the row, so which width you get is the
+# window's business and not a size anyone chose -- the 256 case is reachable, just not always.
+# The fix is a flex BASIS plus aspect-ratio, so the art shrinks and stays square. A later edit
+# "simplifying" it back to a fixed width would look correct at every width but one.
+# Asserted on the BASE rule, which is where the shape lives: the per-size blocks only move the
+# share (`flex-basis` / `max-width`), so a size that forgot to shrink is not a thing that can
+# happen. It was on the Large rule while Large was the only size laid out this way.
+cover = re.search(r'(?<!\S)\.card \.song-cover\s*\{([^{}]*)\}', CSS_RULES)
+check('the cover is sized as a shrinkable share, not a fixed box', bool(cover), cover)
+if cover:
+    body = cover.group(1)
+    check('  ...a flex basis, so a column flex can shrink its HEIGHT', 'flex: 0 1' in body, body)
+    check('  ...kept square by aspect-ratio rather than a matching height', 'aspect-ratio: 1' in body, body)
+    check('  ...with min-height:0, or the shrink never reaches it', 'min-height: 0' in body, body)
+    # (?<![-\w]) and not \b: `\b` sits happily between the hyphen and the h in `min-height`, so the
+    # obvious spelling of this check flagged the `min-height: 0` that the rule NEEDS.
+    check('  ...and no fixed height to fight it',
+          not re.search(r'(?<![-\w])height:\s*\d', body), body)
+head = re.search(r'(?<!\S)\.card \.song-head\s*\{([^{}]*)\}', CSS_RULES)
+check('  ...and its parent can shrink too, or the shrink stops one level up',
+      bool(head) and 'min-height: 0' in head.group(1), head and head.group(1))
+check('  ...in a column, which is what makes the basis a HEIGHT at all',
+      bool(head) and 'flex-direction: column' in head.group(1), head and head.group(1))
+# EVERY PER-SIZE OVERRIDE MOVES THE SHARE, NEVER THE BOX. A `width`/`height` pair in one of these
+# would pin the art at that size and reintroduce the overflow the base rule exists to stop -- which
+# is exactly the spelling all four size blocks used before 2026-09-18.
+for sel in re.findall(r'\.card \.song-cover\s*\{([^{}]*)\}', CSS_RULES):
+    if 'flex: 0 1' in sel:
+        continue                                      # the base rule, checked above
+    check('a per-size cover override moves the share only: %r' % sel.strip(),
+          not re.search(r'(?<![-\w])(width|height):\s*\d', sel), sel)
+
+# Tempo and key are audio's answer to dimensions, and the client table and the server's default
+# order have to list the same keys or a saved config silently drops one.
+SERVER = io.open(os.path.join(ROOT, 'server.py'), encoding='utf-8').read()
+for k in ('bpm', 'key'):
+    check("'%s' is a fact the grid can draw" % k, "key: '%s'" % k in JS)
+    check("  ...and one the server will store", "'key': '%s'" % k in SERVER)
 
 # ---- 5. no hardcoded colours --------------------------------------------------------------------
 hexes = re.findall(r'#[0-9a-fA-F]{3,8}\b', band or '')

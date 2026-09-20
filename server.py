@@ -764,6 +764,10 @@ THUMBS_DIR = os.path.join(DATA_DIR, 'thumbs')     # shared cache (keyed by absol
 # full-size PNGs carrying metadata, made on demand for one purpose — and mixing them into the
 # thumbnail tree would put them in the path of every thumbnail size sweep.
 DRAGPNG_DIR = os.path.join(DATA_DIR, 'dragpng')
+# Bump when the drag picture's CONTENTS change — it is part of the cache key, so a cached picture
+# built by an older version is never served again. 2: graphs are written as tEXt even when the text
+# leaves Latin-1 (see _add_graph_chunk), which is the only chunk type ComfyUI reads.
+_DRAGPNG_BUILD = 2
 CONFIG_PATH = os.environ.get('CV_CONFIG') or os.path.join(BASE, 'config.json')
 # THE ONE SETTING THAT NEEDS CHANGING FROM OUTSIDE THE APP, in a file that holds nothing else.
 # A port already in use stops the app starting, so it cannot be fixed from inside the app -- and the
@@ -941,6 +945,44 @@ def _song_fields(row, generic_names):
     }
 
 
+def _add_graph_chunk(info, key, value):
+    """Add a ComfyUI graph to a PNG as a chunk ComfyUI will actually read.
+
+    IT HAS TO BE tEXt, AND PIL DECIDES THAT FOR YOU. `PngInfo.add_text` writes tEXt while the
+    string fits Latin-1 and switches SILENTLY to iTXt the moment it does not — one curly
+    apostrophe is enough, and song lyrics are full of them. ComfyUI's PNG reader only looks at
+    tEXt, so the graph is simply not there as far as it is concerned: the picture drags, the drop
+    is accepted, and nothing loads.
+
+    IT LOOKED LIKE A FLAC BUG AND IS NOT ONE. The author reported the drag failing on a track
+    whose thumbnail drew correctly and whose "Open in ComfyUI" worked -- and that pairing is the
+    tell, because Open sends the JSON straight through the bridge and never goes near a PNG chunk.
+    Our own reader takes tEXt, zTXt and iTXt alike (see read_png_text_chunks), which is why the
+    app showed the metadata perfectly while ComfyUI saw none of it. The video route had the same
+    latent fault, with a comment claiming these chunks came out "exactly" as ComfyUI's SaveImage
+    writes them.
+
+    THE PAYLOAD IS JSON, so it can be re-emitted ASCII-only and mean precisely the same thing:
+    json.dumps escapes every non-ASCII character as \\uXXXX, which JSON.parse turns back into the
+    character at the other end. Anything that does not parse is left exactly as it was rather than
+    mangled -- an escape applied to non-JSON would corrupt it.
+
+    UNTOUCHED UNLESS IT WOULD OTHERWISE BREAK, which is the whole condition. Re-emitting also
+    renormalises whitespace, and test_video_meta pins that a dragged frame's graph comes back
+    BYTE-IDENTICAL -- a real guarantee worth keeping, since it is what makes an exported frame
+    trustworthy rather than merely equivalent. So the test is the Latin-1 one PIL itself applies:
+    if the text would already have become tEXt, nothing happens to it.
+    """
+    try:
+        value.encode('latin-1')
+    except (UnicodeEncodeError, AttributeError):
+        try:
+            value = json.dumps(json.loads(value), ensure_ascii=True)
+        except Exception:
+            pass
+    info.add_text(key, value)
+
+
 def _build_drag_png(video_path):
     """One frame of a video as PNG bytes, carrying that video's own ComfyUI graphs. None if no
     frame can be decoded (no ffmpeg, or an unreadable file)."""
@@ -951,11 +993,12 @@ def _build_drag_png(video_path):
     info = PngImagePlugin.PngInfo()
     # `workflow` is the one that matters — it is what a drop into ComfyUI restores. `prompt` rides
     # along because it is what OUR OWN reader traces, so an exported frame stays self-describing.
-    # Written with add_text, i.e. exactly the call ComfyUI's own SaveImage uses, so the chunks come
-    # out in the form its loader already expects.
+    # Through _add_graph_chunk, never add_text directly: PIL picks the chunk TYPE from the
+    # content, and the one type ComfyUI reads is the one it stops using as soon as the text
+    # leaves Latin-1. See that function.
     for k in ('workflow', 'prompt'):
         if meta.get(k):
-            info.add_text(k, meta[k])
+            _add_graph_chunk(info, k, meta[k])
     buf = io.BytesIO()
     with im:
         im.convert('RGB').save(buf, 'PNG', pnginfo=info, compress_level=6)
@@ -974,11 +1017,11 @@ def _build_song_drag_png(audio_path):
     doesn't. Deliberately not a generic placeholder: dropped onto a Load Image node either one is a
     true picture OF this song rather than a stand-in for one.
     """
-    frames = comfy_meta.read_id3_txxx(audio_path)
+    frames = comfy_meta.read_audio_tags(audio_path)
     if not (frames.get('workflow') or frames.get('prompt')):
         return None
     im = None
-    art = comfy_meta.read_id3_cover(audio_path)
+    art = comfy_meta.read_audio_cover(audio_path)
     if art:
         try:
             im = Image.open(io.BytesIO(art)).convert('RGB')
@@ -990,7 +1033,7 @@ def _build_song_drag_png(audio_path):
     info = PngImagePlugin.PngInfo()
     for k in ('workflow', 'prompt'):
         if frames.get(k):
-            info.add_text(k, frames[k])
+            _add_graph_chunk(info, k, frames[k])
     buf = io.BytesIO()
     with im:
         im.convert('RGB').save(buf, 'PNG', pnginfo=info, compress_level=6)
@@ -1035,7 +1078,7 @@ def workflow_json(path):
     try:
         ext = os.path.splitext(path)[1].lower()
         if ext in index_db.AUDIO_EXTS:
-            return comfy_meta.read_id3_txxx(path).get('workflow') or None
+            return comfy_meta.read_audio_tags(path).get('workflow') or None
         if ext in index_db.VIDEO_EXTS:
             return (comfy_meta.read_video_meta(path) or {}).get('workflow') or None
         return (comfy_meta.read_png_text_chunks(path) or {}).get('workflow') or None
@@ -1085,7 +1128,7 @@ APP_NAME = 'VV Curator'
 # welcome after an update, and it is what a version check would compare against. READER_VERSION in
 # index_db.py is a different number for a different job: what the app can extract from a file. They
 # move independently, and a release that reads nothing new does not touch it.
-APP_VERSION = '1.1'
+APP_VERSION = '1.2'
 
 # ---- telling people a newer version exists ----------------------------------------------------
 # WHERE A RELEASE IS ANNOUNCED: owner/name of the GitHub repo. This is the whole reason the project
@@ -1911,6 +1954,35 @@ def _coerce_theme(theme):
             if k in THEME_TOKENS and isinstance(v, str) and _HEX_RE.match(v.strip())}
 
 
+# THERE ARE TWO MODES AND EACH KEEPS ITS OWN EDITS. Dark and Light are the only themes; a colour
+# you change belongs to the one you changed it ON, so switching to the other and back finds your
+# work where you left it, and Reset puts that mode -- only that mode -- back to stock. The word
+# "Custom" is gone with the third segment: it named a STATUS you fell into by touching a swatch,
+# not a theme anyone chose, which is why it read as a hidden feature (the author, 2026-09-15) and
+# there was only ever one slot to overwrite.
+THEME_MODES = ('dark', 'light')
+
+
+def _reads_as_light(hexstr):
+    """Perceived luminance, matching app.js's isLightHex — green dominates how bright a colour
+    looks, so a plain average would call the wrong mid-tones light."""
+    if not isinstance(hexstr, str) or not _HEX_RE.match(hexstr.strip()):
+        return False
+    n = int(hexstr.strip()[1:], 16)
+    return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) > 140
+
+
+def _coerce_theme_mode(mode):
+    return mode if mode in THEME_MODES else 'dark'
+
+
+def _coerce_theme_edits(edits):
+    """{'dark': {...}, 'light': {...}} — each side validated like any theme."""
+    if not isinstance(edits, dict):
+        return {m: {} for m in THEME_MODES}
+    return {m: _coerce_theme(edits.get(m)) for m in THEME_MODES}
+
+
 # ---- card facts --------------------------------------------------------------------------------
 # What the grid card's small print shows, in what order. ONE ORDERED LIST -- position is the list's
 # own, not a number anyone has to keep consistent -- and each entry says where that fact appears:
@@ -1925,7 +1997,7 @@ def _coerce_theme(theme):
 # UNKNOWN KEYS ARE DROPPED, MISSING ONES ARE APPENDED at their default. That pair is what makes a
 # new fact appear for someone whose config predates it instead of being invisible until they open
 # Settings -- the same reason a retired filter vanishes from an old snapshot.
-CARD_FACT_KEYS = ('dims', 'duration', 'age', 'filesize', 'model', 'folder')
+CARD_FACT_KEYS = ('dims', 'duration', 'age', 'bpm', 'key', 'filesize', 'model', 'folder')
 CARD_FACT_PLACES = ('always', 'hover', 'off')
 # Age FIRST: The author's stated preference, 2026-08-24 -- "I prefer the time to come before the image
 # size". It is the default rather than something he has to set, because a default nobody would
@@ -1934,6 +2006,10 @@ DEFAULT_CARD_FACTS = [
     {'key': 'age', 'place': 'always'},
     {'key': 'dims', 'place': 'always'},
     {'key': 'duration', 'place': 'always'},
+    # Audio's answer to dims: a fact only one kind of file has. Kept in step with CARD_FACTS in
+    # app.js, which is the table that says what each fact IS.
+    {'key': 'bpm', 'place': 'always'},
+    {'key': 'key', 'place': 'always'},
     {'key': 'filesize', 'place': 'hover'},
     {'key': 'model', 'place': 'hover'},
     {'key': 'folder', 'place': 'hover'},
@@ -1959,15 +2035,30 @@ def _cards_or_none(value):
     rows = _coerce_card_facts(value)
     if rows == DEFAULT_CARD_FACTS:
         return None
-    if tuple(r['key'] for r in rows) in _SUPERSEDED_CARD_ORDERS and all(
-            r['place'] == d['place'] for r, d in zip(sorted(rows, key=lambda x: x['key']),
-                                                     sorted(DEFAULT_CARD_FACTS, key=lambda x: x['key']))):
+    # THE SUPERSEDED CHECK READS THE BLOCK AS IT WAS WRITTEN, not as coercion left it.
+    # _coerce_card_facts appends every fact added since a config was saved, so comparing the COERCED
+    # list stopped matching the moment `bpm` and `key` were added on 2026-09-18: a 2026-08 config
+    # holding the superseded order became an eight-key list matching no entry here, and would have
+    # frozen an order nobody ever chose -- the single thing this branch exists to prevent.
+    sent = {r.get('key') for r in (value if isinstance(value, list) else []) if isinstance(r, dict)}
+    written = [r for r in rows if r['key'] in sent]
+    default_place = {d['key']: d['place'] for d in DEFAULT_CARD_FACTS}
+    if (tuple(r['key'] for r in written) in _SUPERSEDED_CARD_ORDERS
+            and all(r['place'] == default_place[r['key']] for r in written)):
         return None                                   # a superseded default, not a choice
     return rows
 
 
 def _effective_cards():
-    """What the client should draw from: the saved order, or the shipped one."""
+    """What the client should draw from: the saved order, or the shipped one.
+
+    NOT coerced here, deliberately. Every way into CONFIG['cards'] already runs _cards_or_none --
+    load_config on the way in, api_save_settings on a save -- so a block reaching this point has
+    had the facts added since it was written appended to it already. Coercing a second time was
+    written here on 2026-09-18 and taken straight back out: it changed no output, and defensive
+    work that cannot be observed is indistinguishable from work that is load-bearing the day
+    someone tries to simplify it. test_settings pins the real guarantee at load_config.
+    """
     return CONFIG.get('cards') or [dict(r) for r in DEFAULT_CARD_FACTS]
 
 
@@ -2176,6 +2267,25 @@ def _normalize_config(cfg):
     miner = cfg.get('miner') if isinstance(cfg.get('miner'), dict) else {}
     cfg['miner'] = _coerce_miner(DEFAULT_MINER, miner)
     cfg['theme'] = _coerce_theme(cfg.get('theme'))
+    # `theme` is the RESOLVED set the app applies; the two below say how it was built. The client
+    # is the only writer and always sends all three together, so they cannot drift -- the server
+    # cannot resolve them itself, because the light preset's values live in app.js and belong
+    # there, beside the stylesheet they override.
+    # MIGRATION, for a config written before modes existed: a palette that is neither empty nor a
+    # plain preset was somebody's custom set, and it is kept as edits on whichever mode it reads
+    # as, rather than thrown away for having been authored under the old model.
+    cfg['theme_mode'] = _coerce_theme_mode(cfg.get('theme_mode'))
+    if not isinstance(cfg.get('theme_edits'), dict):
+        legacy = cfg['theme']
+        # A light-looking background is the one reliable signal of which base it was built on:
+        # the preset it started from supplied every surface, and those are what a user rarely
+        # touches. No overrides at all is the dark default and needs no migration.
+        mode = 'light' if _reads_as_light(legacy.get('--bg')) else 'dark'
+        cfg['theme_mode'] = mode if legacy else cfg['theme_mode']
+        cfg['theme_edits'] = {m: (dict(legacy) if (m == mode and legacy) else {})
+                              for m in THEME_MODES}
+    else:
+        cfg['theme_edits'] = _coerce_theme_edits(cfg.get('theme_edits'))
     # None when it matches the shipped order: absent means "follow the default", which is what lets
     # the default ever change again.
     cards = _cards_or_none(cfg.get('cards')) if cfg.get('cards') is not None else None
@@ -2238,6 +2348,13 @@ def save_config():
            'general': CONFIG.get('general', dict(DEFAULT_GENERAL)),
            'miner': CONFIG.get('miner', dict(DEFAULT_MINER)),
            'theme': CONFIG.get('theme', {}),
+           # WHICH MODE YOU ARE ON, and the edits each mode carries. `theme` above is the
+           # resolved result -- these two are the authoring state that produced it, and without
+           # them a colour you changed on Dark could not be told from one you changed on Light.
+           # Subject to the note below like every other block: leave a line out and it survives
+           # exactly until the next save of anything else.
+           'theme_mode': CONFIG.get('theme_mode', 'dark'),
+           'theme_edits': CONFIG.get('theme_edits', {m: {} for m in THEME_MODES}),
            'snapshots': CONFIG.get('snapshots', []),
            'extensions': CONFIG.get('extensions', {}),
            # What each extension has been configured with — subject to the note below like
@@ -3600,6 +3717,8 @@ class Handler(BaseHTTPRequestHandler):
                     'miner': CONFIG['miner'],
                     'miner_defaults': DEFAULT_MINER,
                     'theme': CONFIG['theme'],
+                    'theme_mode': CONFIG.get('theme_mode', 'dark'),
+                    'theme_edits': CONFIG.get('theme_edits', {m: {} for m in THEME_MODES}),
                     'cards': _effective_cards(),
                     'cards_defaults': [dict(r) for r in DEFAULT_CARD_FACTS],
                     'snapshots': CONFIG['snapshots'],
@@ -4054,6 +4173,31 @@ class Handler(BaseHTTPRequestHandler):
             where.append("EXISTS (SELECT 1 FROM tags tg WHERE tg.image_id=i.id AND tg.source='fav')")
         if q.get('note', [''])[0] == '1':      # "Has notes" — same emptiness test the ✎ card mark uses
             where.append("i.note IS NOT NULL AND TRIM(i.note) <> ''")
+        # Aspect. Both numbers are already on the row for every image AND every video, so this is one
+        # integer comparison per row the query was going to read anyway -- no new column, no index,
+        # nothing to backfill. It reads WHAT A CARD CONTAINS, like every filter but File type: any
+        # member matching brings the whole card, which is what you want for a set whose members are
+        # all the same shape and harmless for the rare one where they are not.
+        #
+        # SQUARE IS A TOLERANCE, NOT AN EQUALITY, and that is the author's call (2026-09-16): an
+        # upscale or a crop lands a pixel or two off, and a 1024x1026 render filed under Landscape
+        # reads as a bug rather than as precision. 2% of the LONGER side, so the band does not widen
+        # with the picture -- ABS(w-h)*50 <= MAX(w,h) is the same test without floating point.
+        # Portrait and landscape are then defined AGAINST it rather than against each other, so the
+        # three are non-overlapping and every shaped file lands in exactly one.
+        #
+        # A NULL DIMENSION FAILS EVERY COMPARISON, which is how songs stay out without naming them:
+        # a song has no picture and so has no shape. Anything else with dimensions missing -- an
+        # unreadable file -- drops out the same way, which is the honest answer rather than guessing.
+        aspect = q.get('aspect', [''])[0]
+        if aspect in ('portrait', 'landscape', 'square'):
+            sq = "ABS(i.width - i.height) * 50 <= MAX(i.width, i.height)"
+            if aspect == 'square':
+                where.append("i.width > 0 AND i.height > 0 AND " + sq)
+            elif aspect == 'portrait':
+                where.append("i.width > 0 AND i.height > 0 AND i.height > i.width AND NOT " + sq)
+            else:
+                where.append("i.width > 0 AND i.height > 0 AND i.width > i.height AND NOT " + sq)
         # exclude: drop anything matching ANY excluded term (positive/model/filename)
         xfts = to_fts(q.get('x', [''])[0], ' OR ')
         if xfts:
@@ -4843,11 +4987,20 @@ class Handler(BaseHTTPRequestHandler):
                 # cover nobody has looked at yet has none, and testing for one would hide exactly
                 # the covers that have never been shown. /thumb/<id> generates on demand.
                 cov = conn.execute(
-                    "SELECT id FROM images WHERE group_id=? AND LOWER(ext) IN (%s) "
+                    "SELECT id, filename, mtime FROM images WHERE group_id=? AND LOWER(ext) IN (%s) "
                     "ORDER BY id LIMIT 1"
                     % ','.join('?' * len(index_db.IMAGE_EXTS)),
                     (gid, *sorted(index_db.IMAGE_EXTS))).fetchone()
             d['cover_url'] = _cover_url(r, cov['id'] if cov else None)
+            # THE PICTURE SAVED BESIDE A SONG IS THE WORKFLOW-BEARING ORIGINAL, exactly as a still
+            # saved beside a video is, and the drag handle wants the FILE rather than a thumbnail of
+            # it. Without this the handle asked for a picture built out of the song itself, which
+            # can only be done for an MP3 -- so on a FLAC it 404'd and the detail view showed a
+            # broken box where the drag source should be.
+            if cov:
+                d['cover_file_id'] = cov['id']
+                d['cover_file_url'] = _file_url(cov['id'], cov['mtime'], rkey,
+                                                cov['filename'])
         conn.close()
         v = int(d.get('mtime') or 0)
         d['thumb_url'] = f'/thumb/{iid}?v={v}&r={rkey}&s={thumbs_mod.THUMB_SIZE}'
@@ -4987,7 +5140,17 @@ class Handler(BaseHTTPRequestHandler):
             mtime = int(os.path.getmtime(path))
         except OSError:
             return self._json({'error': 'not found'}, 404)
-        key = hashlib.sha1(f'{os.path.abspath(path)}|{mtime}'.encode('utf-8')).hexdigest()
+        # THE BUILD NUMBER IS PART OF THE KEY, and leaving it out cost two rounds of "still broken".
+        # The cache was keyed on path|mtime alone, so the picture was built once and served for
+        # ever: correct while the only thing that decides its contents is the source file, and
+        # wrong the moment the BUILDER changes. Both fixes to the chunk type landed behind a cache
+        # entry written before them, so the author updated, retested, and was handed the identical
+        # broken picture -- with nothing on screen to suggest he was looking at something stale.
+        # Bump _DRAGPNG_BUILD whenever _build_drag_png or _build_song_drag_png changes what they
+        # emit. Old entries are simply never asked for again; they are a few KB each and live under
+        # data/, so they are left rather than swept.
+        key = hashlib.sha1(
+            f'{os.path.abspath(path)}|{mtime}|{_DRAGPNG_BUILD}'.encode('utf-8')).hexdigest()
         cache = os.path.join(DRAGPNG_DIR, key[:2], key + '.png')
         if not (os.path.exists(cache) and os.path.getsize(cache) > 0):
             try:
@@ -5591,10 +5754,17 @@ class Handler(BaseHTTPRequestHandler):
         arriving by a different route: a number that answers "how many exist" while presenting
         itself as "how many you would get".
 
-        A TAG DOES NOT NARROW ITSELF, the rule /api/facets already follows. `tags` and `fav` are
-        dropped from the query before the filter is built, so ticking one label leaves the other
-        four counting what switching to them would give. Without that, the exclusive labels would
-        all read 0 the moment you picked one, and the list could not be used to move between them.
+        AN EXCLUSIVE LIST DOES NOT NARROW ITSELF. Labels are one-at-a-time, so the label you have
+        picked is dropped from their own filter: without that the other four would read 0 the moment
+        you picked one, and the list could no longer be used to move between them. Favourites is the
+        same shape and drops itself for the same reason.
+
+        TAGS ARE NOT EXCLUSIVE and therefore drop nothing. They stack, so there is no "what would
+        switching give" to protect -- only "what would adding this give", which is the intersection.
+        Until 2026-09-18 tags were lumped in with labels and excluded wholesale, which left a tag
+        listed even when adding it would return nothing. Both of the author's reports that day were
+        this one rule applied too broadly: "selecting a Label is NOT filtering tags", then "tags
+        need to narrow their counts - they behave inconsistently with other filters".
 
         THE COST, measured on 110k images: 5ms with nothing narrowing (the fast path below), 7ms on
         a model, 75-81ms on a text search or a type filter. It re-runs on every filter change rather
@@ -5602,13 +5772,62 @@ class Handler(BaseHTTPRequestHandler):
         matters as much as it does.
         """
         conn = db()
-        # Its own dimension, removed. `q` is parsed query args (name -> list), so a shallow copy is
-        # enough; the originals are left alone for every other reader of this request.
-        q2 = dict(q or {})
-        q2.pop('tags', None)
-        q2.pop('fav', None)
-        joins, wsql, params = self._filters(q2)
+        # THREE LISTS, THREE FILTER SETS, each blind only to itself. `q` is parsed query args
+        # (name -> list), so a shallow copy is enough; the originals are left alone for every other
+        # reader of this request.
+        sel = [x.strip().lower() for x in (q.get('tags', [''])[0] or '').split(',') if x.strip()]
+        is_label = lambda t: t.startswith('label:')
+
+        def filters_without(drop):
+            """The shared filter with one list's own selection removed -- 'label' or 'fav'.
+
+            THE TAG LIST DROPS NOTHING, and that is the 2026-09-18 correction. The rule is that a
+            list must not narrow ITSELF, and for LABELS that is essential: they are exclusive, so
+            hiding the label you picked is what lets the other four say what switching would give.
+            Tags are not exclusive -- they stack -- so there is no switching to protect, and
+            excluding them meant a tag stayed listed even when adding it would give you nothing.
+            The author: "I think tags need to narrow their counts - they behave inconsistently with
+            other filters."
+
+            With the ticks applied, a tag that would return nothing drops out of the GROUP BY by
+            itself, and what is left is exactly the set worth adding next.
+            """
+            q2 = dict(q or {})
+            keep = [t for t in sel if not (drop == 'label' and is_label(t))]
+            q2['tags'] = [','.join(keep)]
+            if drop == 'fav':
+                q2.pop('fav', None)
+            return self._filters(q2)
+
+        # The three usually coincide -- nothing selected in any of the lists means all three are the
+        # same filter -- so they are cached by the SQL they produce rather than run three times for
+        # one answer. With a label picked and no tags, it is two.
+        _built = {}
+
         any_tag = ANY_TAG_SQL.replace('source', 't.source')
+
+        def count_rows(drop, only_labels):
+            """Tag rows counted under the filter that is blind to `drop`. `only_labels` picks which
+            half of the table comes back, since labels ride it as `label:<slug>`."""
+            joins, wsql, params = filters_without(drop)
+            plain = not wsql and not joins.strip()
+            half = ("t.tag LIKE 'label:%'" if only_labels else "t.tag NOT LIKE 'label:%'")
+            matching = f"t.image_id IN (SELECT i.id FROM images i {joins} {wsql})"
+            key = (plain, wsql, tuple(params), only_labels)
+            if key in _built:
+                return _built[key]
+            sql = (f"SELECT t.tag, COUNT(*) c, MAX(t.source='user') AS mine FROM tags t "
+                   f"WHERE {half} AND {any_tag} "
+                   f"GROUP BY t.tag ORDER BY c DESC, t.tag COLLATE NOCASE") if plain \
+                else (f"SELECT t.tag, COUNT(*) c, MAX(t.source='user') AS mine FROM tags t "
+                      f"WHERE {matching} AND {half} AND {any_tag} "
+                      "GROUP BY t.tag ORDER BY c DESC, t.tag COLLATE NOCASE")
+            rows = [{'name': r['tag'], 'count': r['c'], 'machine': not r['mine']}
+                    for r in conn.execute(sql, () if plain else params)]
+            _built[key] = rows
+            return rows
+
+        joins, wsql, params = filters_without('fav')
         # NOTHING NARROWING MEANS NO JOIN, and this is not an optimisation for a rare case -- it is
         # the two cases that felt slow. Boot has no filters by definition, and Reset all clears them
         # by definition, so both were paying a join against every image to reach an answer the tags
@@ -5620,18 +5839,31 @@ class Handler(BaseHTTPRequestHandler):
         # started with. It is also the shape this endpoint was optimised into once already -- the
         # docstring above is the record of that -- and the shape the boot path has always paid.
         plain = not wsql and not joins.strip()
+        # WHICH IMAGES MATCH, ASKED ONCE -- not re-asked per tag row. Joining tags to images let
+        # SQLite drive from the tags side: it scanned all three million tag rows and, for each, read
+        # a whole image row by rowid -- prompt text and all -- to learn only whether that image
+        # passes the filter. Three million random reads through the largest table in the database,
+        # measured on the author's library at 3.0-3.7s where the unfiltered shape took 0.2s.
+        #
+        # THIS IS THE FAULT THE DOCSTRING ABOVE RECORDS KILLING, wearing a different hat. The orphan
+        # guard went because it probed images once per TAG row; the JOIN that replaced it did the
+        # same thing, and nothing was measuring the filtered path -- the recorded 5-81ms costs are
+        # all from the unfiltered one. So the filter answers first, as a set of ids, and counting
+        # tags never touches the images table.
+        #
+        # Measured on a fixture at his scale (114,726 images / 2.9M tag rows / 354MB, carrying real
+        # prompt text, or the per-row read looks free): 6168ms -> 988ms, identical rows back. An
+        # EXISTS spelling is the slow shape again at 6820ms -- the same per-row probe written
+        # differently, which is exactly how this came back the first time. See bench_taglist_fix.py.
+        matching = f"t.image_id IN (SELECT i.id FROM images i {joins} {wsql})"
+        # Tags blind to the tag ticks; labels blind to the label pick. One list, as before, because
+        # the client already knows a `label:` row belongs in the Labels section -- and the tag half
+        # keeps its own ordering, which is the half anyone reads in order.
         with self._phase('taglist'):
-            sql = (f"SELECT t.tag, COUNT(*) c, MAX(t.source='user') AS mine FROM tags t "
-                   f"WHERE {any_tag} GROUP BY t.tag ORDER BY c DESC, t.tag COLLATE NOCASE") if plain \
-                else (f"SELECT t.tag, COUNT(*) c, MAX(t.source='user') AS mine "
-                      f"FROM tags t JOIN images i ON i.id = t.image_id {joins} {wsql} AND {any_tag} "
-                      "GROUP BY t.tag ORDER BY c DESC, t.tag COLLATE NOCASE")
-            tags = [{'name': r['tag'], 'count': r['c'], 'machine': not r['mine']}
-                    for r in conn.execute(sql, () if plain else params)]
+            tags = count_rows('none', only_labels=False) + count_rows('label', only_labels=True)
         with self._phase('fav'):
             fsql = "SELECT COUNT(*) c FROM tags t WHERE t.source='fav'" if plain \
-                else (f"SELECT COUNT(*) c FROM tags t JOIN images i ON i.id = t.image_id "
-                      f"{joins} {wsql} AND t.source='fav'")
+                else f"SELECT COUNT(*) c FROM tags t WHERE {matching} AND t.source='fav'"
             fav = conn.execute(fsql, () if plain else params).fetchone()['c']
         conn.close()
         self._json({'tags': tags, 'favorites': fav})
@@ -6072,6 +6304,13 @@ class Handler(BaseHTTPRequestHandler):
                 CONFIG['miner'] = _coerce_miner(CONFIG['miner'], b['miner'])
         if isinstance(b.get('theme'), dict):
             CONFIG['theme'] = _coerce_theme(b['theme'])   # replace wholesale (Reset sends {})
+        # The authoring state behind it: which mode, and what each mode has been changed to.
+        # Sent together with `theme` on every save, so the resolved set and the recipe for it
+        # cannot disagree.
+        if b.get('theme_mode') is not None:
+            CONFIG['theme_mode'] = _coerce_theme_mode(b.get('theme_mode'))
+        if isinstance(b.get('theme_edits'), dict):
+            CONFIG['theme_edits'] = _coerce_theme_edits(b['theme_edits'])
         if isinstance(b.get('cards'), list):
             CONFIG['cards'] = _cards_or_none(b['cards'])
             if CONFIG['cards'] is None:
@@ -6089,6 +6328,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({'error': f'Could not save settings: {e}'}, 500)
         self._json({'ok': True, 'general': CONFIG['general'],
                     'miner': CONFIG['miner'], 'theme': CONFIG['theme'],
+                    'theme_mode': CONFIG.get('theme_mode', 'dark'),
+                    'theme_edits': CONFIG.get('theme_edits', {m: {} for m in THEME_MODES}),
                     'cards': _effective_cards()})
 
     def api_save_snapshots(self):

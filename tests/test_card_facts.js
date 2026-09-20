@@ -19,8 +19,10 @@
  *      feature ships subtly wrong, so it gets its own assertion.
  *   2. `365 / 365.25` floors to ZERO, so a naive year branch prints "0 years" on something plainly
  *      a year old — a fault that only ever shows up in production, on old files.
- *   3. A song's face already draws its own duration, tempo and key. A band there would print the
- *      length twice, on the one card design that is tight at every size.
+ *   3. A song gets the band like anything else, and its duration must not print twice. The face
+ *      used to draw duration/tempo/key itself and the band was switched off for audio entirely --
+ *      which hid four facts that were never on the face to begin with. Now the facts live in the
+ *      band and the FACE's row is the one that stands down, wherever the band exists.
  */
 'use strict';
 
@@ -134,8 +136,22 @@ check('a missing file size prints nothing, never a stray dash', nosize.includes(
 check('  and the rest of its row survives', /class="cf-row cf-hover"[^>]*>m</.test(nosize), true);
 
 check('nothing known at all means no band', cardFactsHTML({}), '');
-check('a song gets no band — its face already draws duration/bpm/key',
-      cardFactsHTML({ is_audio: true, duration: 38, mtime: ago(DAY) }), '');
+// A SONG GETS THE BAND, since 2026-09-18. It used to be suppressed outright because the drawn face
+// already printed the duration -- true of duration and of nothing else, so one overlapping fact
+// hid age, file size, model and folder as well. The overlap is settled in CSS instead (the face's
+// own .song-facts row is hidden wherever the band exists), which is what test_card_facts_css.py
+// pins; here we only assert that the band is BUILT.
+const song = cardFactsHTML({ is_audio: true, duration: 38, mtime: ago(DAY),
+                             size: 1234567, bpm: 78, key: 'D♭ major', model: 'minimax_music3' });
+check('a song gets a band like any other card', song !== '', true);
+check('  its always row carries age, length, tempo and key',
+      /class="cf-row cf-always"[^>]*>1 day · 0:38 · 78 bpm · D♭ major</.test(song), true);
+check('  its hover row carries the file facts', /class="cf-row cf-hover"[^>]*>1.2 MB · minimax_music3</.test(song), true);
+// Tempo and key are audio's answer to dimensions: present on one kind of file, absent everywhere
+// else, and absent means absent rather than an empty slot.
+const still = cardFactsHTML({ width: 8, height: 8, mtime: ago(DAY) });
+check('an image has no tempo or key, and no gap where they would be',
+      /bpm|major|· ·/.test(still), false);
 
 const longmodel = cardFactsHTML({ mtime: ago(DAY), model: 'wan2.2_t2v_high_noise_14B_fp8_scaled' });
 check('the hover row carries its full text as a tooltip, since it is the one that ellipsises',

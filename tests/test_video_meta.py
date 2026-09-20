@@ -148,7 +148,7 @@ check('  including the model', (res['model_name'] or '').startswith('minimax_h3'
 # ---- 4. the picture a video becomes, for dragging ---------------------------------------------
 # ComfyUI's loader reads tEXt chunks. iTXt/zTXt would look fine in Pillow and be invisible to it.
 import server  # noqa: E402  (imported late: it reads env at import time)
-from PIL import Image  # noqa: E402
+from PIL import Image, PngImagePlugin  # noqa: E402
 
 vid = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_tmp_drag.mp4')
 with open(vid, 'wb') as f:
@@ -173,6 +173,56 @@ check('  named workflow and prompt', {k for _, k in chunks} == {'workflow', 'pro
 im = Image.open(io.BytesIO(png))
 check('  and the workflow survives the round trip', im.text.get('workflow') == WF)
 check('  as does the prompt graph', im.text.get('prompt') == API)
+
+# ---- the same rule, against text that actually tests it -------------------------------------
+# THE tEXt CHECK ABOVE PASSED FOR YEARS WITHOUT PROVING ANYTHING, because every graph it was given
+# was pure ASCII and PIL writes tEXt for those whatever you do. `PngInfo.add_text` switches
+# SILENTLY to iTXt the moment the string leaves Latin-1 — one curly apostrophe does it, and song
+# lyrics are full of them — and ComfyUI reads only tEXt, so the drop is accepted and nothing loads.
+# Our own reader takes all three chunk types, so the app would show such a file perfectly while
+# ComfyUI saw nothing: the two halves disagreeing is exactly what makes this invisible.
+# Zero hits is not evidence until the pattern has caught something it should.
+import json as _json  # noqa: E402
+
+CURLY = _json.dumps({'1': {'inputs': {'text': 'don’t stop \U0001F3B5'}}}, ensure_ascii=False)
+info = PngImagePlugin.PngInfo()
+server._add_graph_chunk(info, 'workflow', CURLY)
+buf = io.BytesIO()
+Image.new('RGB', (8, 8)).save(buf, 'PNG', pnginfo=info)
+kinds2 = set()
+raw = buf.getvalue()
+i = 8
+while i < len(raw):
+    ln, typ = struct.unpack('>I4s', raw[i:i + 8])
+    if typ in (b'tEXt', b'iTXt', b'zTXt'):
+        kinds2.add(typ.decode())
+    i += 12 + ln
+    if typ == b'IEND':
+        break
+check('a graph holding a curly quote is still written as tEXt', kinds2 == {'tEXt'},
+      'wrote %s — ComfyUI would accept the drop and load nothing' % (kinds2 or 'nothing'))
+check('  and still parses to the same graph',
+      _json.loads(Image.open(io.BytesIO(raw)).text['workflow']) == _json.loads(CURLY))
+# The bare call is what the guard replaces, so pin that it really does differ — otherwise this
+# test would keep passing if someone dropped _add_graph_chunk and went back to add_text.
+bare = PngImagePlugin.PngInfo()
+bare.add_text('workflow', CURLY)
+buf2 = io.BytesIO()
+Image.new('RGB', (8, 8)).save(buf2, 'PNG', pnginfo=bare)
+check('  and add_text alone would NOT have', b'iTXt' in buf2.getvalue())
+
+# ---- the cache must not outlive the builder ---------------------------------------------------
+# A drag picture is cached under data/, and the key was the source file's path and date ALONE. So
+# the picture was built once and served for ever, and BOTH chunk-type fixes above landed behind an
+# entry written before them: the author updated, retested, and was handed the identical broken
+# picture twice, with nothing on screen to say it was stale. The builder's version number is part
+# of the key now. This pins that it participates at all — the failure it prevents is silent, and a
+# cache that ignores the thing that fills it looks perfectly healthy from the outside.
+import hashlib  # noqa: E402
+
+_k = lambda build: hashlib.sha1(('/some/song.flac|1700000000|%s' % build).encode()).hexdigest()
+check('bumping the drag-picture build changes its cache key', _k(1) != _k(2))
+check('  and the current build is wired into server', isinstance(server._DRAGPNG_BUILD, int))
 
 # A video with NO graphs must still produce a usable picture, just without chunks — the drag should
 # degrade to "a picture of the frame", never to an error.
