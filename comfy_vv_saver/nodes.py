@@ -141,6 +141,14 @@ def _parameters_text(prompt, width, height, positive, negative, link_models, sav
     pos = positive if positive else _text_from(g, sid, "positive")
     neg = negative if negative else _text_from(g, sid, "negative")
 
+    # No real negative (Flux/Krea etc., CFG=1): the negative input traces back to the same text
+    # node as the positive -- through a zero-out, or through an rgthree Context whose outputs the
+    # walk cannot tell apart -- so the block would state the prompt twice and publish the second
+    # copy as a negative. comfy_meta._from_graph has dropped this duplicate since the reader was
+    # written; the saver never did, so a Krea image arrived on Civitai with a bogus negative.
+    if neg and neg == pos:
+        neg = ""
+
     model_name = ""
     if raw_ckpt:
         model_name = os.path.splitext(raw_ckpt.replace("\\", "/").split("/")[-1])[0]

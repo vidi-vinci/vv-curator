@@ -2194,6 +2194,34 @@ _NUM_KEYS = ('value', 'seed', 'noise_seed', 'int', 'float', 'number', 'Number', 
 _COMBO_KEYS = ('sampler_name', 'scheduler', 'combo', 'value', 'string', 'text', 'name')
 
 
+def _slot_literal(node, slot, kinds):
+    """The literal sitting at output `slot` of a settings node, or None.
+
+    A LINK NAMES THE SLOT IT CAME FROM and both resolvers below used to throw that away, scanning
+    the node's inputs for a name off a list instead. That works for a one-output primitive and
+    fails on anything that hands out several values at once -- rgthree's `KSampler Config` emits
+    steps_total, refiner_step, cfg, sampler_name, scheduler from one node, none of those names are
+    on either list, and every link into it looks identical once the slot is discarded. The author's
+    Krea workflow wires exactly that, so its exports carried no Steps and no CFG scale at all, and
+    the scheduler came back as the SAMPLER's name because `sampler_name` sits first on the combo
+    list.
+
+    A multi-output settings node lists its outputs in widget order, so slot N is the Nth input.
+    Only a literal of the wanted type is accepted, which is what makes this safe to try first: a
+    node whose outputs do NOT mirror its inputs yields the wrong type or a link, and the caller
+    falls through to the name lists exactly as before.
+    """
+    if slot is None:
+        return None
+    vals = list((node.get('inputs') or {}).values())
+    if not 0 <= slot < len(vals):
+        return None
+    v = vals[slot]
+    if isinstance(v, bool):                     # a flag is never a setting we want
+        return None
+    return v if isinstance(v, kinds) else None
+
+
 def _resolve_number(g, ref, seen=None, depth=0):
     """Follow a numeric node/link input to its literal value (or None). Handles inputs wired through
     primitive/slider nodes — e.g. rgthree `Seed` ({seed:…}) and `mxSlider` ({Xi,Xf,isfloatX})."""
@@ -2217,6 +2245,9 @@ def _resolve_number(g, ref, seen=None, depth=0):
     if not node:
         return None
     inp = node.get('inputs', {})
+    slotted = _slot_literal(node, ref[1] if len(ref) > 1 else None, (int, float))
+    if slotted is not None:
+        return slotted
     # mxSlider-style int/float pair with a selector flag
     if 'isfloatX' in inp and ('Xf' in inp or 'Xi' in inp):
         return inp.get('Xf') if inp.get('isfloatX') in (1, '1', True) else inp.get('Xi')
@@ -2249,6 +2280,9 @@ def _resolve_combo(g, ref, seen=None, depth=0):
     if not node:
         return None
     inp = node.get('inputs', {})
+    slotted = _slot_literal(node, ref[1] if len(ref) > 1 else None, str)
+    if slotted is not None:
+        return slotted
     for k in _COMBO_KEYS:
         if isinstance(inp.get(k), str):
             return inp[k]
@@ -2904,7 +2938,14 @@ def _png_chunk(ctype, data):
 def splice_parameters_png(src_path, text):
     """Return a new PNG (bytes) = the source image with ALL existing text chunks removed and one
     `parameters` chunk added. Dropping ComfyUI's own `prompt`/`workflow` chunks stops Civitai from
-    falling back to its broken graph parser. Pixels (IDAT) are copied verbatim — no re-encode."""
+    falling back to its broken graph parser. Pixels (IDAT) are copied verbatim — no re-encode.
+
+    THE CHUNK GOES BEFORE THE FIRST IDAT, where ComfyUI and A1111 both put theirs. It used to go
+    after the last one, just before IEND — legal PNG, and invisible to any reader that stops at
+    the pixels. Pillow is that reader: `Image.open(...).info` has no `parameters` key until you
+    call `load()`, because a trailing text chunk is only picked up on the way past IEND. A parser
+    that reads the header and moves on sees a file with no metadata in it at all.
+    """
     with open(src_path, 'rb') as f:
         raw = f.read()
     sig = b'\x89PNG\r\n\x1a\n'
@@ -2923,13 +2964,13 @@ def splice_parameters_png(src_path, text):
         i += 12 + length
         if ctype in (b'tEXt', b'zTXt', b'iTXt'):
             continue                            # drop every existing text chunk
-        if ctype == b'IEND':
-            out += param_chunk
+        if not inserted and ctype in (b'IDAT', b'IEND'):
+            out += param_chunk                  # ahead of the pixels, where readers look
             inserted = True
-            out += chunk
-            break
         out += chunk
-    if not inserted:                            # defensive: no IEND seen
+        if ctype == b'IEND':
+            break
+    if not inserted:                            # defensive: neither IDAT nor IEND seen
         out += param_chunk
     return bytes(out)
 

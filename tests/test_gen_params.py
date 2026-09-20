@@ -196,6 +196,54 @@ def main():
     check('api_image prefers the oversized-seed column when it is set',
           "seed = d.pop('gp_seed_s', None)" in src)
 
+    # ---- A settings node that hands out SEVERAL values at once -------------------------------
+    # rgthree's `KSampler Config` emits steps_total, refiner_step, cfg, sampler_name and scheduler
+    # from one node, so every link into it is ['260', N] and the SLOT is the only thing telling
+    # them apart. The resolvers used to discard the slot and scan the node's inputs for a name off
+    # a list; none of these names are on either list, so the author's Krea workflow exported with
+    # no Steps and no CFG scale at all -- and the scheduler came back as the SAMPLER's name,
+    # because `sampler_name` sits first on the combo list. That is samples/civit cant read.png.
+    cfg_node = {'class_type': 'KSampler Config (rgthree)',
+                'inputs': {'steps_total': 10, 'refiner_step': 8, 'cfg': 1.0,
+                           'sampler_name': 'euler_ancestral', 'scheduler': 'beta'}}
+    slotted = {
+        '260': cfg_node,
+        '262': {'class_type': 'BasicScheduler',
+                'inputs': {'steps': ['260', 0], 'scheduler': ['260', 4], 'model': ['1', 0]}},
+        '261': {'class_type': 'CFGGuider',
+                'inputs': {'cfg': ['260', 2], 'model': ['1', 0], 'positive': '6', 'negative': '7'}},
+        '263': {'class_type': 'RandomNoise', 'inputs': {'noise_seed': 5270441131205}},
+        '266': {'class_type': 'KSamplerSelect', 'inputs': {'sampler_name': ['260', 3]}},
+        '228': {'class_type': 'SamplerCustomAdvanced',
+                'inputs': {'noise': ['263', 0], 'guider': ['261', 0], 'sampler': ['266', 0],
+                           'sigmas': ['262', 0], 'latent_image': ['11', 0]}},
+        '11': {'class_type': 'EmptyLatentImage', 'inputs': {'width': 936, 'height': 1672}},
+        '1': {'class_type': 'CheckpointLoaderSimple',
+              'inputs': {'ckpt_name': 'Krea/cielbleuKrea2_v1.safetensors'}},
+    }
+    sp = comfy_meta.extract_gen_params(slotted, '228')
+    check('steps come off output slot 0, not a guessed input name', sp['steps'] == 10, sp['steps'])
+    check('CFG comes off output slot 2', sp['cfg'] == 1.0, sp['cfg'])
+    check('the scheduler is slot 4, NOT the sampler name sitting earlier in the node',
+          sp['scheduler'] == 'beta', sp['scheduler'])
+    check('the sampler is still read correctly', sp['sampler_name'] == 'euler_ancestral',
+          sp['sampler_name'])
+    # The point of all of it: A1111 always writes Steps and CFG scale, and a parser modelled on
+    # A1111's output can reject a block that is missing them.
+    text = comfy_meta._format_parameters({'positive': 'a castle', 'negative': '',
+                                          'model_name': 'cielbleuKrea2_v1', 'loras': []},
+                                         sp, 936, 1672)
+    check('the exported block carries Steps', 'Steps: 10' in text, text)
+    check('the exported block carries CFG scale', 'CFG scale: 1' in text, text)
+
+    # The slot is trusted only when it holds a literal of the right type, which is what keeps a
+    # node whose outputs do NOT mirror its inputs falling through to the old behaviour.
+    passthru = {'9': {'class_type': 'Reroute', 'inputs': {'value': ['8', 0]}},
+                '8': {'class_type': 'Seed (rgthree)', 'inputs': {'seed': 4242}}}
+    check('a plain one-output relay still resolves through the link',
+          comfy_meta._resolve_number(passthru, ['9', 0]) == 4242,
+          comfy_meta._resolve_number(passthru, ['9', 0]))
+
     print('\n' + ('FAILED: ' + '; '.join(_fails) if _fails else 'all checks passed'))
     return 1 if _fails else 0
 
