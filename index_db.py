@@ -604,7 +604,7 @@ SCHEMA_VERSION = 5  # bump when the FTS layout changes (5 = index song lyrics to
 # this would have stayed blank in the Details pane for good, with nothing on screen suggesting a
 # rescan would help. Caught while writing the 1.2 notes, which promise the offer appears: the
 # claim is what found the gap, so the notes were doing the job a claim is supposed to do.
-READER_VERSION = 5
+READER_VERSION = 6
 
 # How many files a forced run must actually read before its speed is worth remembering. Enough to
 # level out a slow first folder, small enough that a modest library still produces a number.

@@ -92,6 +92,7 @@ def main():
     checks += run_code_checks(prefix)
     checks += foreign_writer_checks()
     checks += sidecar_roundtrip_checks()
+    checks += resource_hash_checks()
 
     return finish(checks)
 
@@ -304,6 +305,40 @@ def stage_vocabulary_checks():
                 _resolve_stage(STAGE_CUSTOM, "   ") == "", repr(_resolve_stage(STAGE_CUSTOM, "   "))))
     out.append(("the default is one of the choices",
                 "Final" in STAGE_CHOICES, STAGE_CHOICES))
+    return out
+
+
+def resource_hash_checks():
+    """A LoRA stored WITHOUT its extension still resolves to a file, so it can carry a hash.
+
+    ComfyUI Lora Manager records `KreaKult_v2`, not `KreaKult_v2.safetensors`, and
+    `folder_paths.get_full_path` wants the exact filename -- so the LoRA reached Civitai named but
+    unlinked while the checkpoint, whose stored name keeps its extension, linked fine. Reported
+    2026-09-20 from two real files: the exported copy carried `Lora hashes:` and the VV-saved
+    original did not.
+    """
+    import folder_paths as fp
+    from comfy_vv_saver.nodes import _by_basename, _make_hash_resolver
+
+    fp.get_filename_list = lambda c: ["Krea\KreaKult_v2.safetensors", "other_v1.safetensors"]
+    fp.get_full_path = lambda c, n: ("M:/models/%s/%s" % (c, n)) if str(n).endswith(
+        ".safetensors") else None
+
+    out = []
+    got = _by_basename("loras", "KreaKult_v2")
+    out.append(("an extensionless LoRA name finds its file",
+                got == "M:/models/loras/Krea\KreaKult_v2.safetensors", got))
+    got = _by_basename("loras", "Krea\KreaKult_v2.safetensors")
+    out.append(("  a full name still finds it", bool(got), got))
+    got = _by_basename("loras", "NeverInstalled")
+    out.append(("  a name nothing matches returns None rather than a wrong file",
+                got is None, got))
+
+    # The resolver reaches the fallback only after the exact lookup fails, and hashes whatever it
+    # lands on -- so a missing file yields no hash and the resource stays text, never a wrong link.
+    resolve = _make_hash_resolver()
+    out.append(("an unresolvable resource still yields no hash",
+                resolve("loras", "NeverInstalled") is None, "None"))
     return out
 
 

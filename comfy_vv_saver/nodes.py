@@ -96,6 +96,39 @@ def _auto_set_id(prompt):
     return "auto-" + hashlib.sha256(blob).hexdigest()[:12]
 
 
+def _by_basename(category, raw):
+    """The file for a resource ComfyUI's own lookup cannot find, matched on its name without an
+    extension -- or None.
+
+    STORED WITHOUT ITS EXTENSION. A LoRA wired through ComfyUI Lora Manager (and rgthree's Power
+    Lora Loader reading from it) records `KreaKult_v2`, not `KreaKult_v2.safetensors`, and
+    `get_full_path` wants the exact filename. So the LoRA appeared in the block by name and never
+    carried a hash -- which on Civitai is the difference between a resource it NAMES and one it
+    LINKS to its model page. The checkpoint was unaffected, because a checkpoint's stored name
+    keeps its extension, which is why a post came up with the model linked and the LoRAs not.
+
+    comfy_meta's own resolver has had this fallback since the reader learned to read Lora Manager
+    (model_hash.resolve_file); this side never got it. Only tried when the exact lookup has already
+    failed, so a real filename is never second-guessed.
+    """
+    stem = os.path.splitext(str(raw).replace("\\", "/").split("/")[-1])[0].lower()
+    if not stem:
+        return None
+    try:
+        names = folder_paths.get_filename_list(category)
+    except Exception:
+        return None
+    for name in names or ():
+        if os.path.splitext(str(name).replace("\\", "/").split("/")[-1])[0].lower() == stem:
+            try:
+                path = folder_paths.get_full_path(category, name)
+            except Exception:
+                path = None
+            if path:
+                return path
+    return None
+
+
 def _make_hash_resolver():
     """(category, raw_name) -> Civitai AutoV2 hash, using ComfyUI's own model resolution.
     Returns None for anything it can't resolve, so a resource still appears as text but never
@@ -107,6 +140,8 @@ def _make_hash_resolver():
             path = folder_paths.get_full_path(category, raw)
         except Exception:
             path = None
+        if not path:
+            path = _by_basename(category, raw)
         if not path:
             return None
         digest = model_hash.sha256_cached(path, _HASH_CACHE)
