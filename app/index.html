@@ -351,6 +351,7 @@
         <button class="ftab active" type="button" data-tab="filters">Filters<span class="ftab-badge hidden">0</span></button>
         <button class="ftab" type="button" data-tab="labels">Labels<span class="ftab-badge hidden">0</span></button>
         <button class="ftab" type="button" data-tab="tags">Tags<span class="ftab-badge hidden">0</span></button>
+        <button class="ftab" type="button" data-tab="groups">Groups<span class="ftab-badge hidden">0</span></button>
       </div>
 
       <div class="tabpane" data-pane="filters">
@@ -495,6 +496,31 @@
         <div id="labelList" class="label-list full"></div>
       </div>
 
+      <!-- GROUPS. A Group is a hand-picked LIST of files; a Snapshot is a saved QUERY. The pane is
+           the Labels pane's component, because clicking a row does the same thing in the same
+           place: narrow the grid. What it adds is the RADIO, and that is load-bearing rather than
+           decorative -- the app already uses a checkbox to mean "pick several" (Tags, the root
+           list, Notes/Awards) and had nothing at all to mean "one at a time". Without it the rows
+           look exactly like Flags, which are multi-select. -->
+      <div class="tabpane" data-pane="groups">
+        <div class="tags-box full">
+          <!-- maxlength matches MAX_COLLECTION_NAME in server.py. The server truncates anyway;
+               this is so the limit is felt while typing instead of discovered afterwards, which is
+               the bug the Snapshots field still has. -->
+          <input id="groupSearch" type="text" maxlength="40"
+                 placeholder="search, or type + Enter to make one" autocomplete="off">
+        </div>
+        <div id="groupList" class="label-list full"></div>
+        <!-- ONE shared actions menu for every row, placed by placeMenu() against the ⋯ that
+             opened it -- the same arrangement the library list uses. A menu per row would be a
+             hundred hidden menus in the DOM on a hundred groups. -->
+        <div id="groupActions" class="popmenu hidden">
+          <button data-act="rename">Rename…</button>
+          <div class="popmenu-sep"></div>
+          <button data-act="delete" class="danger">Delete group…</button>
+        </div>
+      </div>
+
       <div class="tabpane" data-pane="tags">
         <div class="tags-box full">
           <input id="tagSearch" type="text" placeholder="search, or type + Enter to tag selection" autocomplete="off">
@@ -540,6 +566,23 @@
         <span class="selbar-actions">
           <button id="selTag" class="has-ico" title="Add a tag to the selected images">Tag</button>
           <button id="selFav" class="has-ico" title="Favorite the selected images">Favorite</button>
+          <!-- Top-level rather than behind the ⋯, by the same test that put Tag and Favorite here:
+               a verb you reach for while culling. The ⋯ next door is described as holding "the
+               occasional three", and filling a group is not occasional. Its label becomes
+               "Remove" while the grid is filtered to a group -- see updateSelBar. -->
+          <span class="sel-group">
+            <button id="selGroup" class="has-ico" aria-haspopup="true" aria-expanded="false"
+                    title="Put the selected files in a group">Group</button>
+            <!-- The picker. The facet dropdown's own anatomy -- a search field over a list -- so
+                 Model, Folder and this are one control the user learns once. The list is built by
+                 renderGroupPicker(); the "make this one" row appears only when what you typed
+                 matches nothing, so the common case needs no decision. -->
+            <div id="selGroupMenu" class="facet-panel popmenu hidden">
+              <input id="groupPick" class="facet-search" type="text" maxlength="40"
+                     placeholder="search, or type a new name…" autocomplete="off">
+              <div id="groupPickList" class="facet-list"></div>
+            </div>
+          </span>
           <!-- The occasional three sit behind a ⋯, the same idiom the detail view's action bar
                uses: the bar holds what you reach for while culling, the menu holds the rest. Also
                buys back the width that made an always-visible bar wrap on a narrow window (DS-9). -->
@@ -953,8 +996,13 @@
           <section class="settings-panel hidden" data-sec="cards">
             <div>
               <label>Card details</label>
-              <p class="set-help">Shown on Large and Extra-large cards. Order applies top to bottom.</p>
+              <p class="set-help">Shown on Large and Extra-large cards. Order applies top to bottom.
+                Filenames appear on hover for most file types.</p>
               <div id="cardFactRows" class="fact-rows"></div>
+              <!-- Written by syncCardFactsNote() and empty until it runs. Below the rows at the
+                   author's direction (2026-09-21): the fact reads better as a closing remark than
+                   as a third muted line stacked above the controls. -->
+              <p id="cardFactsNote" class="set-help hidden"></p>
             </div>
           </section>
         </div>
@@ -1127,6 +1175,11 @@
         <div class="kv"><span>Date</span><div id="dDate" class="val"></div></div>
         <div class="kv hidden" id="dQualRow"><span>Quality</span>
           <div class="val"><b id="dReward" title="pyiqa quality score (1-10)"></b><span class="muted"> / 10</span></div></div>
+        <!-- The publishing receipt. `Published` is a LABEL and says only that you posted; this row
+             says which post. Hidden for every file that has never gone out, which is nearly all. -->
+        <div class="kv hidden" id="dPostRow"><span>Posted</span>
+          <div class="val"><span id="dPost"></span>
+            <button id="dPostOpen" class="link btn-sm" title="Open this post on Civitai">Open draft</button></div></div>
         <!-- Generation settings from the BASE sampler, plus the VAE (the author moved it here from the
              Details block, 2026-08-23). Hidden wholesale when the file carries none, rather than
              shown as a column of empty rows: a library predating either needs Rebuild metadata,
@@ -1156,6 +1209,20 @@
         <div class="field">
           <div class="field-head">Labels</div>
           <div id="dLabels" class="label-btns"></div>
+        </div>
+        <!-- WHICH GROUPS THIS FILE IS IN. The rail answers "what is in this group"; this answers
+             "what does this file belong to", and neither substitutes for the other. Built on the
+             Add-tags row above it deliberately: same field-head, same searchbox, same datalist,
+             same chips-row -- one control learned once, and the chip's own ✕ is the only way to
+             take ONE file out of ONE group without filtering to it first. -->
+        <div class="field">
+          <div class="field-head">Groups</div>
+          <div class="searchbox">
+            <input id="dGroupInput" list="groupoptions" maxlength="40"
+                   placeholder="group + Enter" autocomplete="off">
+          </div>
+          <div id="dGroups" class="chips-row"></div>
+          <datalist id="groupoptions"></datalist>
         </div>
         <div class="field">
           <div class="field-head">Add tags</div>
@@ -1201,7 +1268,8 @@
           <!-- Opens this file's workflow on ComfyUI's canvas — the one-click version of dragging it
                there. Needs the bridge, which ships inside the VV nodes; hidden entirely for a
                file that carries no workflow, dimmed when ComfyUI isn't answering. -->
-          <button id="dComfyOpen" class="da-btn" title="Open this workflow in ComfyUI" aria-label="Open in ComfyUI"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6" /> <path d="M10 14 21 3" /> <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg></button>
+          <!-- A PENCIL, not an arrow-out-of-a-box. The external-link glyph was read as "publish" or "send somewhere" (the author, 2026-09-21), which is close to the opposite of what it does: it puts the workflow back on the canvas to work on. -->
+          <button id="dComfyOpen" class="da-btn" title="Edit in ComfyUI" aria-label="Edit in ComfyUI"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9" /> <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg></button>
           <button id="dReveal" class="da-btn" title="Show in Explorer" aria-label="Show in Explorer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" /></svg></button>
           <!-- Extensions. Built by renderExtMenu() from whatever is switched on, and absent
                entirely when that is nothing -- an icon opening an empty menu promises
@@ -1339,6 +1407,12 @@
            of them (machine tags) only exists while a tagger extension is installed. Its own .hidden
            rule lives in style.css — there is no global one. -->
       <div id="dlgChoices" class="dialog-choices hidden"></div>
+      <!-- STRIP + FIELDS MODE, for a dialog that composes something rather than confirming it.
+           Both are built by _dlgOpen from what the caller passes: the strip shows the files in the
+           order they will go, and the fields are drawn by extFieldRow from an extension's own
+           schema, which is what keeps an extension from supplying markup. -->
+      <div id="dlgStrip" class="dialog-strip hidden"></div>
+      <div id="dlgFields" class="dialog-fields hidden"></div>
       <div class="dialog-actions">
         <button id="dlgCancel" class="ghost">Cancel</button>
         <button id="dlgOk" class="primary">OK</button>

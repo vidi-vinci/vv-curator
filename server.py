@@ -271,6 +271,55 @@ def _expand_to_cards(ids):
     return sorted(set(ids) | {r['id'] for r in rows})
 
 
+def _post_ids(b, ids):
+    """The files a post sends: each card's members, or -- with `exact` -- only these.
+
+    EXACT IS SETS OFF. With both collapse modes off the grid shows every file as its own card, so
+    what you selected is already the file list, and adding a video's still or a set's other members
+    back would send files you deliberately left out. The author, 2026-09-23: that is how you choose single
+    files for a post. A retry is exact too: its ids are the files the first attempt sent."""
+    return list(dict.fromkeys(ids)) if b.get('exact') else _expand_to_cards_ordered(ids)
+
+
+def _expand_to_cards_ordered(ids):
+    """_expand_to_cards, but the caller's order survives.
+
+    That function sorts by id, which is right for recycling -- an unordered set of files to delete
+    -- and wrong for publishing, where the FIRST file becomes the post's cover. A selection the user
+    has just looked at in a strip must not come out in a different order on the far end.
+
+    Each card's extra members follow the id that pulled them in, so a video selected before its
+    still stays before it.
+    """
+    if not ids:
+        return ids
+    extra = set(_expand_to_cards(ids)) - set(ids)
+    if not extra:
+        return list(ids)
+    conn = db()
+    try:
+        rows = conn.execute(
+            f"SELECT id, group_id FROM images WHERE id IN "
+            f"({','.join('?' * len(set(ids) | extra))})", list(set(ids) | extra)).fetchall()
+    finally:
+        conn.close()
+    gid = {r['id']: r['group_id'] for r in rows}
+    out, used = [], set()
+    for iid in ids:
+        if iid in used:
+            continue
+        out.append(iid)
+        used.add(iid)
+        g = gid.get(iid)
+        if g is None:
+            continue
+        for other in sorted(extra):
+            if other not in used and gid.get(other) == g:
+                out.append(other)
+                used.add(other)
+    return out
+
+
 def _sidecars_going_with(conn, ids):
     """The `.txt` sidecars that may be recycled alongside these files, and no others.
 
@@ -1128,7 +1177,7 @@ APP_NAME = 'VV Curator'
 # welcome after an update, and it is what a version check would compare against. READER_VERSION in
 # index_db.py is a different number for a different job: what the app can extract from a file. They
 # move independently, and a release that reads nothing new does not touch it.
-APP_VERSION = '1.2.1'
+APP_VERSION = '1.3.0'
 
 # ---- telling people a newer version exists ----------------------------------------------------
 # WHERE A RELEASE IS ANNOUNCED: owner/name of the GitHub repo. This is the whole reason the project
@@ -1322,7 +1371,8 @@ def _bool_or(val, default):
 EXT_DIR = os.path.join(BASE, 'extensions')
 
 # What a manifest may declare. `produces` is what the extension contributes to an image —
-# 'score' (a number), 'tags' (rows in the tags table), or 'text' (prose, SHOWN AND NOT STORED).
+# 'score' (a number), 'tags' (rows in the tags table), 'text' (prose, SHOWN AND NOT STORED), or
+# 'post' (the files go SOMEWHERE ELSE and only a receipt comes back).
 # Paths are resolved relative to the folder holding the manifest.
 #
 # 'text' is deliberately the only kind with nowhere to land. A score and a tag are both things the
@@ -1330,13 +1380,23 @@ EXT_DIR = os.path.join(BASE, 'extensions')
 # forever is an answer that has to be cleared, versioned and searched. Until there is a reason to
 # keep one, a text extension answers the question in front of you and the answer goes away with
 # the image — which is also what makes a model that turns out to be bad at this cost nothing.
-EXT_PRODUCES = ('score', 'tags', 'text')
+#
+# 'post' IS THE FIRST KIND THAT IS ONE UNIT OVER THE WHOLE SELECTION rather than one result per
+# file, and that is the only reason it is a kind at all rather than a flag: `produces` is what the
+# client branches on to decide what an action means, and "publish these five as one thing" cannot
+# be expressed by any of the other three. What lands locally is a receipt — the id and URL of the
+# thing that now exists elsewhere — because the files themselves have not changed and the real
+# record is on the far end, where it can be edited by someone who is not this app.
+EXT_PRODUCES = ('score', 'tags', 'text', 'post')
 
 # The field types an extension may ask for in its `settings` block. An extension declares fields;
 # THE APP DRAWS THEM. That is the whole reason this is a schema rather than a page supplied by the
 # extension: a panel built from the app's own components cannot drift from the rest of Settings,
 # and an extension author cannot get the house style wrong because they never touch it.
-EXT_FIELD_TYPES = ('text', 'password', 'number', 'checkbox', 'textarea')
+# 'select' arrived last and for a reason worth keeping: the publishing extension needed to offer
+# two domains, and a free-text box for a value with exactly two valid answers is a typo waiting to
+# become a broken link. It carries `options`, which is the only field-level extra any type has.
+EXT_FIELD_TYPES = ('text', 'password', 'number', 'checkbox', 'textarea', 'select')
 
 
 def _ext_resolve(folder, rel):
@@ -1345,8 +1405,12 @@ def _ext_resolve(folder, rel):
     return os.path.normpath(os.path.join(folder, rel)) if rel else None
 
 
-def _ext_fields(raw):
-    """Whitelist one manifest's `settings` block into a list of field descriptors.
+def _ext_fields(raw, what='settings'):
+    """Whitelist one manifest's `settings` (or `compose`) block into a list of field descriptors.
+
+    `what` names the block in every error message. The two blocks are the SAME SHAPE on purpose:
+    one form mechanism, one validator, one drawing path -- the difference is only when the form is
+    shown (settings once, compose per run), which is the caller's business and not this one's.
 
     Raises ValueError on anything malformed, which the caller turns into the manifest's `error`.
     A BAD FIELD IS AN ERROR, NOT A DROPPED ONE — the quiet alternative is a setting the user can
@@ -1356,24 +1420,42 @@ def _ext_fields(raw):
     if raw is None:
         return []
     if not isinstance(raw, list):
-        raise ValueError('`settings` must be a list')
+        raise ValueError('`%s` must be a list' % what)
     out, seen = [], set()
     for i, f in enumerate(raw):
         if not isinstance(f, dict):
-            raise ValueError('setting %d is not an object' % (i + 1))
+            raise ValueError('%s %d is not an object' % (what, i + 1))
         key = str(f.get('key') or '').strip()
         if not key:
-            raise ValueError('setting %d has no key' % (i + 1))
+            raise ValueError('%s %d has no key' % (what, i + 1))
         if key in seen:
-            raise ValueError('two settings share the key "%s"' % key)
+            raise ValueError('two %s fields share the key "%s"' % (what, key))
         seen.add(key)
         ftype = str(f.get('type') or 'text').strip().lower()
         if ftype not in EXT_FIELD_TYPES:
-            raise ValueError('setting "%s" has an unknown type "%s"' % (key, ftype))
+            raise ValueError('%s "%s" has an unknown type "%s"' % (what, key, ftype))
+        # A select's OPTIONS are part of its schema, so they are validated here rather than trusted
+        # at draw time: an empty list would render a control with nothing to pick, which looks like
+        # a broken app rather than a broken manifest.
+        opts = []
+        if ftype == 'select':
+            raw_opts = f.get('options')
+            if not isinstance(raw_opts, list) or not raw_opts:
+                raise ValueError('%s "%s" is a select with no options' % (what, key))
+            for o in raw_opts:
+                if isinstance(o, dict):
+                    val = str(o.get('value', '')).strip()
+                    lab = str(o.get('label') or val).strip()
+                else:
+                    val = lab = str(o).strip()
+                if not val:
+                    raise ValueError('%s "%s" has an option with no value' % (what, key))
+                opts.append({'value': val, 'label': lab})
         out.append({'key': key, 'type': ftype,
                     'label': str(f.get('label') or key).strip() or key,
                     'placeholder': str(f.get('placeholder') or '').strip(),
                     'help': str(f.get('help') or '').strip(),
+                    'options': opts,
                     'default': f.get('default')})
     return out
 
@@ -1388,9 +1470,12 @@ def _read_extension(folder):
     mf = os.path.join(folder, 'extension.json')
     if not os.path.exists(mf):
         return None
+    # HELP.md is optional and read by the Help window, which appends it under the extension's
+    # name. Presence only here; the text is served by api_doc, by id, never by path.
     base = {'id': ext_id, 'name': ext_id, 'version': '', 'description': '',
+            'has_help': os.path.isfile(os.path.join(folder, 'HELP.md')),
             'produces': '', 'worker': None, 'setup': None, 'venv': None, 'requires': [],
-            'settings': [], 'can_test': False,
+            'settings': [], 'compose': [], 'can_test': False, 'max_items': 0,
             'installed': False, 'ready': False, 'error': None}
     try:
         with open(mf, 'r', encoding='utf-8') as f:
@@ -1418,6 +1503,23 @@ def _read_extension(folder):
     # Whether the worker can check its own setup on demand. See run_ext_test: the app never learns
     # what "working" means for an extension — it asks the worker and repeats the answer.
     base['can_test'] = bool(m.get('test'))
+    # THE MOST FILES ONE RUN MAY TAKE. 0 means no limit, which is what every extension declared
+    # before this existed and what a scorer or a tagger should keep declaring -- those are one
+    # result per file and a thousand is just a longer wait.
+    #
+    # IT BELONGS TO THE DESTINATION, NOT TO THE APP. Civitai caps a post at 20; that is a fact
+    # about Civitai, so it is declared by the extension that talks to Civitai, the same way its
+    # settings fields are. The app enforces the number without knowing where it came from.
+    #
+    # ENFORCED BEFORE A RUN STARTS, and that is the whole point. The publish worker uploads file by
+    # file and only then creates the post, so a run that overruns the cap gets its files REFUSED
+    # part-way: what is already uploaded stays on the account and no post is made. The user is left
+    # with orphans and nothing to show. Finding that out before the first byte is the difference
+    # between a message and a mess.
+    try:
+        base['max_items'] = max(0, int(m.get('max_items') or 0))
+    except (TypeError, ValueError):
+        base['max_items'] = 0
     # What the user can configure. Declaring any field is what earns the extension its own tab in
     # Settings; declaring none leaves it a row in the installed list, which is all the scorer and
     # the tagger have ever needed.
@@ -1426,6 +1528,39 @@ def _read_extension(folder):
     except ValueError as e:
         base['error'] = 'Its settings are malformed: %s.' % e
         return base
+    # WHAT THE USER FILLS IN PER RUN, drawn as a dialog before the job starts. Same schema, same
+    # validator, same field-drawing code as `settings` -- the app still draws every control and an
+    # extension still supplies no markup. The only new idea is WHEN: settings are answered once and
+    # saved, compose is answered every time and thrown away.
+    try:
+        base['compose'] = _ext_fields(m.get('compose'), 'compose')
+    except ValueError as e:
+        base['error'] = 'Its compose fields are malformed: %s.' % e
+        return base
+    # A compose value is echoed back to the page to pre-fill the next run, which is exactly what
+    # the password rule exists to prevent (see _extensions_payload). A secret is standing config;
+    # it belongs in `settings`, where it is blanked on the way out.
+    secret = next((f['key'] for f in base['compose'] if f['type'] == 'password'), None)
+    if secret:
+        base['error'] = ('Its compose field "%s" is a password. A secret belongs in `settings`, '
+                         'which never sends it back to the page.' % secret)
+        return base
+    # A KEY IN BOTH BLOCKS IS AN OVERRIDE, not a mistake. This started as a refusal -- two names for
+    # one value reaching the worker as one merged dict looked like a silent overwrite waiting to
+    # happen. Then the first real case turned up: a default you set once and change for one post,
+    # which is that same collision done on purpose. The merge order already makes compose win, so
+    # the rule is simply stated rather than forbidden.
+    #
+    # The TYPES must still match. A checkbox overriding a text field would mean the worker's one
+    # key changed shape depending on which half supplied it, which no worker could sensibly read.
+    st = {f['key']: f for f in base['settings']}
+    for f in base['compose']:
+        other = st.get(f['key'])
+        if other and other['type'] != f['type']:
+            base['error'] = ('"%s" is a %s setting and a %s compose field. An override has to be '
+                             'the same type as what it overrides.'
+                             % (f['key'], other['type'], f['type']))
+            return base
     if not base['worker']:
         base['error'] = 'extension.json names no worker.'
         return base
@@ -1476,8 +1611,13 @@ def get_extension(ext_id):
     return ext
 
 
-def merge_ext_values(ext, sent, cur):
+def merge_ext_values(ext, sent, cur, fields=None):
     """Fold what the user has on screen (`sent`) into what is stored (`cur`), against the schema.
+
+    `fields` names the block to validate against, defaulting to `settings`. The compose dialog
+    passes `ext['compose']` so that per-run values get the same coercion and the same dropping of
+    undeclared keys -- those values are handed to a worker as configuration, so an undeclared key
+    would be a way to put arbitrary content in front of it from the page.
 
     ONE COPY, because two callers need the answer and must not disagree: Save writes the result to
     disk, and Test hands it to the worker without writing anything. A Test that used the stored
@@ -1489,7 +1629,7 @@ def merge_ext_values(ext, sent, cur):
     otherwise wipe the key every time any other field on the panel was touched.
     """
     out = dict(cur)
-    for f in ext['settings']:
+    for f in (ext['settings'] if fields is None else fields):
         if f['key'] not in sent:
             continue
         v = sent[f['key']]
@@ -1500,6 +1640,15 @@ def merge_ext_values(ext, sent, cur):
                 out[f['key']] = float(v)
             except (TypeError, ValueError):
                 out[f['key']] = ''
+        elif f['type'] == 'select':
+            # ONLY A VALUE THE MANIFEST OFFERS. A select is a closed set, and the page is not the
+            # authority on what is in it -- anything else falls back to the declared default rather
+            # than reaching the worker, which is what stops a hand-made request putting an arbitrary
+            # string where a hostname goes.
+            allowed = [o['value'] for o in (f.get('options') or [])]
+            want = str(v if v is not None else '')
+            out[f['key']] = want if want in allowed else (
+                f.get('default') if f.get('default') in allowed else (allowed[0] if allowed else ''))
         else:
             s = str(v if v is not None else '')[:MAX_EXT_SETTING]
             if f['type'] == 'password' and not s.strip():
@@ -1542,16 +1691,18 @@ def _extensions_payload():
                     'description': e['description'], 'produces': e['produces'],
                     'installed': e['installed'], 'enabled': e['enabled'], 'active': e['active'],
                     'has_setup': bool(e['setup']), 'error': e['error'],
-                    'settings': e['settings'], 'can_test': e['can_test'],
+                    'settings': e['settings'], 'compose': e['compose'],
+                    'can_test': e['can_test'], 'has_help': e['has_help'],
                     'values': {k: ('' if k in secrets else v) for k, v in vals.items()},
                     'secrets_set': sorted(k for k in secrets if vals.get(k))})
     return out
 
 
 def ext_enabled(ext_id):
-    """Enabled unless the user has turned it off. Absent means on: an extension you installed is
-    one you meant to use, and the switch exists to turn things OFF."""
-    return _bool_or(CONFIG.get('extensions', {}).get(ext_id), True)
+    """Off until the user switches it on. The author, 2026-09-23: every extension ships off, so the app
+    with none switched on is local only, and each one is a choice someone made. It was on by
+    default until then, on the theory that installing one meant wanting it."""
+    return _bool_or(CONFIG.get('extensions', {}).get(ext_id), False)
 
 
 def ext_active(ext_id):
@@ -1790,15 +1941,41 @@ THEME_TOKENS = ('--accent', '--active', '--modified', '--danger', '--success', '
 # tag `label:<slug>` — like `style:` tags — so filtering, counts, and the per-root DB come for
 # free; exclusivity (max one per image) is enforced on write. Single source of truth: emitted
 # to the client via /api/config so the two never drift. `key` = one-tap hotkey; `token` = the
-# theme color (editable in Appearance). To add labels later, extend this list (f key free).
-LABELS = [
-    {'slug': 'publish',   'name': 'To publish', 'key': 'a', 'token': '--label-publish'},
-    {'slug': 'published', 'name': 'Published',  'key': 'b', 'token': '--label-published'},
+# theme color (editable in Appearance).
+#
+# TO ADD ONE, CHECK THE KEY IS FREE FIRST -- and `f` is NOT, whatever an older version of
+# this comment said. Single letters already taken in app.js: f (maximize), k (keep, in the
+# cull view), r (refresh), x (reset filters), z (magnifier). A label's key is dispatched by
+# labelByKey BEFORE any of those are tested, so a label given a taken letter does not
+# collide loudly -- it silently shadows a working shortcut. g, h, j and m are free.
+# STATUS answers "what do I do with this next", so a file has exactly one -- you only do one next
+# thing. Exclusivity is a consequence of that, not a rule bolted on.
+STATUS = [
+    {'slug': 'publish',   'name': 'To post',    'key': 'a', 'token': '--label-publish'},
     {'slug': 'refine',    'name': 'To refine',  'key': 'c', 'token': '--label-refine'},
     {'slug': 'explore',   'name': 'To explore', 'key': 'd', 'token': '--label-explore'},
-    {'slug': 'video',     'name': 'For video',  'key': 'e', 'token': '--label-video'},
 ]
+# A FLAG answers "what is true about this", so a file has any number. Published is one: it records
+# that you posted, which does not compete with the file still needing work. It was a Status until
+# 2026-09-21, and that was destructive -- a successful post deleted whatever the file was marked
+# before, so posting something marked To refine silently threw that away.
+#
+# FAVORITE IS A FLAG TOO, but only on screen: the rail draws its row, and its storage stays the
+# `source='fav'` row it always was. It is not listed here because this list is `label:<slug>` tags.
+# See DESIGN.md, *Status and Flags*.
+FLAGS = [
+    {'slug': 'video',     'name': 'For video',  'key': 'e', 'token': '--label-video'},
+    {'slug': 'published', 'name': 'Posted',     'key': 'b', 'token': '--label-published'},
+]
+# BOTH RIDE THE `label:<slug>` TAG, and that is not a compromise: Label is the umbrella term for
+# the fixed-list marks, and Status and Flag are its two kinds. Nothing about the storage changes,
+# so there is no migration -- an existing `label:published` row was already right.
+LABELS = STATUS + FLAGS
 _LABEL_SLUGS = {l['slug'] for l in LABELS}
+_STATUS_SLUGS = {l['slug'] for l in STATUS}
+# The SQL fragment for "a status row", used everywhere exclusivity is enforced or a card asks for
+# the one label it shows. Built from STATUS so adding or moving one cannot leave a query behind.
+_STATUS_SQL = "tag IN (%s)" % ','.join("'label:%s'" % l['slug'] for l in STATUS)
 
 # THE HIDDEN MARK WAS HERE, and went on 2026-09-08. "Not this one, for now": a per-image flag that
 # took the image out of every view until cleared, stored as a tag row (source='hide') and applied to
@@ -2128,6 +2305,14 @@ def _coerce_snapshot_filters(f):
             out[k] = n if n == n and abs(n) != float('inf') else ''
         except (TypeError, ValueError):
             out[k] = ''
+    # The Group filter, as an id. A snapshot CAN carry one, which is the point of making Groups an
+    # ordinary filter rather than a mode: "the videos in Ocean series" is one saved question.
+    # A group deleted since the snapshot was saved leaves an id matching nothing; the client drops
+    # it on render rather than showing an empty grid with nothing lit.
+    try:
+        out['coll'] = int(f.get('coll') or 0)
+    except (TypeError, ValueError):
+        out['coll'] = 0
     return out
 
 
@@ -2227,11 +2412,11 @@ def _normalize_config(cfg):
     # popping makes the removal visible in the file rather than leaving a dead block behind.
     cfg.pop('analysis', None)
     cfg.pop('vlm_url', None)
-    # Extensions: ONLY the off switches are stored, keyed by folder name. An extension the user
-    # has never touched has no entry and is on — so uninstalling one leaves no orphan setting,
-    # and installing one doesn't need the config to have heard of it first.
+    # Extensions: the switch, keyed by folder name. An extension the user has never touched has no
+    # entry and is OFF (every extension ships off, 2026-09-23), so installing one needs nothing
+    # here, and turning one on is the fact worth storing.
     exts = cfg.get('extensions') if isinstance(cfg.get('extensions'), dict) else {}
-    cfg['extensions'] = {str(k): bool(v) for k, v in exts.items() if v is False}
+    cfg['extensions'] = {str(k): v for k, v in exts.items() if isinstance(v, bool)}
     gen = cfg.get('general') if isinstance(cfg.get('general'), dict) else {}
     gen.pop('hide_large', None)       # both removed 2026-09-08; drop rather than leave unread
     gen.pop('show_hidden', None)
@@ -2343,7 +2528,32 @@ def load_config():
     return _normalize_config(cfg)
 
 
+# One save at a time. Two requests saving together each swap in their own temp file, and on Windows
+# the second swap is refused while the first still has the name.
+_config_lock = threading.Lock()
+
+
+def _replace_retrying(src, dst):
+    """os.replace, retried briefly while Windows says the target is in use.
+
+    WinError 5 on the swap is not a permissions fault: it means something else has config.json open
+    without sharing delete, and on his machine that is almost always Defender or the indexer reading
+    the file the PREVIOUS save had just written. The author hit it 2026-09-23 switching an extension on and
+    straight back off. It clears in milliseconds, so waiting beats failing a Settings click."""
+    for wait in (0.05, 0.1, 0.2, 0.4, 0.8):
+        try:
+            return os.replace(src, dst)
+        except PermissionError:
+            time.sleep(wait)
+    os.replace(src, dst)          # the last try raises, and the caller cleans up
+
+
 def save_config():
+    with _config_lock:
+        _save_config()
+
+
+def _save_config():
     tmp = {'roots': CONFIG['roots'], 'active': CONFIG['active'],
            'general': CONFIG.get('general', dict(DEFAULT_GENERAL)),
            'miner': CONFIG.get('miner', dict(DEFAULT_MINER)),
@@ -2401,7 +2611,7 @@ def save_config():
             json.dump(tmp, f, indent=2)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_path, CONFIG_PATH)
+        _replace_retrying(tmp_path, CONFIG_PATH)
     except BaseException:
         # Leave the REAL file untouched and take the scratch one with us. Not `except Exception`:
         # a KeyboardInterrupt or SystemExit mid-write is precisely the interruption this exists
@@ -2745,7 +2955,8 @@ def _store_reward(conn, iid, reward):
                  "ON CONFLICT(image_id) DO UPDATE SET reward=excluded.reward", (iid, reward))
 
 
-def run_ext_batch(ext_id, ids, state, lock, todo_for, store, prefix):
+def run_ext_batch(ext_id, ids, state, lock, todo_for, store, prefix, compose=None,
+                  on_done=None):
     """Drive one extension's worker over `ids`, on a background thread. False if already running.
 
     THE SHARED HALF OF EVERY EXTENSION, and the reason it is shared rather than copied: the
@@ -2758,6 +2969,17 @@ def run_ext_batch(ext_id, ids, state, lock, todo_for, store, prefix):
 
     `prefix` names the extension in its error messages, because "the worker exited early" is
     useless when three of them can be installed.
+
+    `on_done(state)` runs once the worker has finished, whatever happened -- the hook a kind of
+    extension needs for bookkeeping the shared loop has no business knowing about. Publishing uses
+    it to record a run that ended WITHOUT a post: a success writes its own receipt as the worker
+    reports it, but a failure reports nothing, and a failure nobody wrote down is exactly what
+    makes publishing feel like a black box.
+
+    `compose` is what the user typed into this run's dialog. It is MERGED INTO THE SETTINGS FILE
+    rather than given a file of its own: the worker reads one flat dict and never has to care which
+    half was saved and which was typed, and there is one tempfile to delete rather than two. The
+    names cannot collide -- _read_extension refuses a manifest where they do.
     """
     ext = get_extension(ext_id)
     if not ext or not ext['active']:
@@ -2792,10 +3014,12 @@ def run_ext_batch(ext_id, ids, state, lock, todo_for, store, prefix):
             # gained the feature. A file, not an environment variable, because an API key in the
             # environment is inherited by anything the worker itself spawns.
             argv = [ext_python(ext), ext['worker'], items_path]
-            if ext['settings']:
+            values = ext_settings_for(ext)
+            values.update(compose or {})
+            if values:
                 fd2, set_path = tempfile.mkstemp(suffix='.json', prefix='extset_')
                 with os.fdopen(fd2, 'w', encoding='utf-8') as f:
-                    json.dump(ext_settings_for(ext), f)
+                    json.dump(values, f)
                 argv.append(set_path)
             proc = subprocess.Popen(argv,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -2814,6 +3038,16 @@ def run_ext_batch(ext_id, ids, state, lock, todo_for, store, prefix):
                     continue        # a worker's stray print is not a protocol error
                 if msg.get('ready'):
                     state['device'] = msg.get('device')
+                    continue
+                # A CONTROL LINE IS NOT A RESULT: it moves no counter. Kind-agnostic on purpose --
+                # the alternative was teaching this loop one kind's vocabulary, and this loop is
+                # shared precisely because it is the contract rather than the work. Without it a
+                # worker that wants to say "uploading 2 of 5" either counts as a success per line
+                # (seen runs past total) or as a failure, and a worker with one final summary line
+                # to emit has nowhere to put it.
+                if msg.get('control'):
+                    if store(conn, msg):
+                        conn.commit()
                     continue
                 if store(conn, msg):
                     conn.commit()
@@ -2850,6 +3084,13 @@ def run_ext_batch(ext_id, ids, state, lock, todo_for, store, prefix):
                     except OSError:
                         pass
             state.update(running=False, done=True, ended_at=time.time())
+            # AFTER the state is final, so the hook sees what the user will see. Its own failure
+            # must not turn a finished run into a crashed one -- bookkeeping is not the job.
+            if on_done:
+                try:
+                    on_done(state)
+                except Exception:
+                    pass
 
     threading.Thread(target=worker, daemon=True).start()
     return True
@@ -2971,6 +3212,146 @@ def run_reward_batch(ids, skip_scored=True):
 MACHINE_TAG_SQL = "source LIKE 'ext:%'"
 # Either a tag the author typed or one an extension found -- the set that is a TAG, as opposed to the
 # favourite and hidden marks that also live in this table.
+# ---- Groups (stored as `collections`; see the schema note in index_db) -------------------------
+# A Group is a hand-picked LIST of files. A Snapshot is a QUERY. Both earn their place and neither
+# can express the other: a snapshot cannot hold "these nine, because I said so", and a group cannot
+# follow the library as it grows.
+#
+# THE STORAGE IS NAMED `collections`, THE UI SAYS "GROUP". `images.group_id` already means a SET,
+# and that collision is the whole reason -- see the comment on the table itself. This module is the
+# only place the two words meet; everything below speaks `collection`, everything the client sees
+# says group.
+MAX_COLLECTIONS = 200
+# FORTY, NOT the snapshot's sixty. A snapshot name is read in a field that spans the rail; a group
+# name is read in a CHIP in the detail panel, beside the file's tags. The cap is set by the
+# narrowest place the name has to fit, and the client carries the same number as `maxlength` so the
+# limit is felt while typing rather than discovered afterwards.
+MAX_COLLECTION_NAME = 40
+
+
+def _coll_name(raw):
+    """A group name as it will be stored, or '' if it cannot be one."""
+    return ' '.join(str(raw or '').split())[:MAX_COLLECTION_NAME].strip()
+
+
+def list_collections(conn, ids_for=None, matching=None, params=()):
+    """Every group, with how many files it holds. Name-sorted: the picker and the rail both read as
+    a list you scan, not a history.
+
+    THE COUNT FOLLOWS THE FILTERS, like every other number in the rail. That convention was settled
+    on 2026-09-14 after the rail said "To publish 10" beside a grid holding one -- a number that
+    answers "how many exist" while presenting itself as "how many you would get". `matching` is a
+    SQL fragment selecting the visible image ids (from _filters, which carries the library scope
+    too); pass None for the unfiltered total.
+
+    ASKED ONCE, NOT PER ROW. The matching set is one subquery inside the count, the same shape
+    api_tags was optimised into -- joining per group row would re-read the images table once per
+    membership row to learn only whether it passes.
+
+    FILES, NOT CARDS. The grid collapses a still+video pair into one card, so a group holding a
+    pair reports 2 here and draws 1 there. That gap is the whole rail's, not this feature's --
+    facets, Labels and Tags all count files -- and it is on the list as BR-2. Counting cards HERE
+    alone would make Groups the one number in the rail that meant something different.
+
+    `ids_for` is an optional image id: each row then also carries `has`, whether THAT file is in
+    the group. One query instead of a second round trip, and it is what lets the picker show ticks.
+    """
+    if matching:
+        rows = conn.execute(
+            "SELECT c.id, c.name, (SELECT COUNT(*) FROM collection_members m "
+            "  WHERE m.collection_id = c.id AND m.image_id IN (%s)) AS n "
+            "FROM collections c ORDER BY c.name COLLATE NOCASE" % matching, tuple(params)).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT c.id, c.name, COUNT(m.image_id) AS n "
+            "FROM collections c LEFT JOIN collection_members m ON m.collection_id = c.id "
+            "GROUP BY c.id, c.name ORDER BY c.name COLLATE NOCASE").fetchall()
+    out = [{'id': r['id'], 'name': r['name'], 'count': r['n']} for r in rows]
+    if ids_for is not None:
+        have = {r[0] for r in conn.execute(
+            "SELECT collection_id FROM collection_members WHERE image_id=?", (ids_for,))}
+        for c in out:
+            c['has'] = c['id'] in have
+    return out
+
+
+def collection_create(conn, name):
+    """Make a group. Returns its row, or None if the name is unusable or already taken.
+
+    THE NAME IS THE IDENTITY as far as the user is concerned -- the picker offers to make one when
+    what you typed matches nothing -- so a clash returns the EXISTING group rather than an error.
+    Typing a name that is already there and getting that group is what someone means by it.
+    """
+    name = _coll_name(name)
+    if not name:
+        return None
+    row = conn.execute("SELECT id, name FROM collections WHERE name = ? COLLATE NOCASE",
+                       (name,)).fetchone()
+    if row:
+        return {'id': row['id'], 'name': row['name']}
+    if conn.execute("SELECT COUNT(*) FROM collections").fetchone()[0] >= MAX_COLLECTIONS:
+        return None
+    cur = conn.execute("INSERT INTO collections(name, created_at) VALUES(?,?)",
+                       (name, time.time()))
+    return {'id': cur.lastrowid, 'name': name}
+
+
+def collection_add(conn, cid, ids):
+    """Put files in a group. Returns how many were NOT already there.
+
+    INSERT OR IGNORE, so adding a selection that overlaps what is already in the group is the
+    no-op it looks like rather than an error -- you selected six, four were in, two go in.
+    """
+    ids = [i for i in ids if isinstance(i, int)]
+    if not ids or not conn.execute("SELECT 1 FROM collections WHERE id=?", (cid,)).fetchone():
+        return 0
+    before = conn.execute("SELECT COUNT(*) FROM collection_members WHERE collection_id=?",
+                          (cid,)).fetchone()[0]
+    now = time.time()
+    conn.executemany(
+        "INSERT OR IGNORE INTO collection_members(collection_id, image_id, added_at) "
+        "SELECT ?, id, ? FROM images WHERE id = ?", [(cid, now, i) for i in ids])
+    after = conn.execute("SELECT COUNT(*) FROM collection_members WHERE collection_id=?",
+                         (cid,)).fetchone()[0]
+    return after - before
+
+
+def collection_remove(conn, cid, ids):
+    """Take files out of a group. The files themselves are untouched; this is the only kind of
+    removal in the app that is not a deletion, which is why every confirm around it says so."""
+    ids = [i for i in ids if isinstance(i, int)]
+    if not ids:
+        return 0
+    # Counted before and after rather than read off cursor.rowcount: executemany's rowcount is
+    # documented as unreliable for anything but the last statement, and this number is shown to
+    # the user ("3 files removed"), so it has to be the real one.
+    before = conn.execute("SELECT COUNT(*) FROM collection_members WHERE collection_id=?",
+                          (cid,)).fetchone()[0]
+    conn.executemany("DELETE FROM collection_members WHERE collection_id=? AND image_id=?",
+                     [(cid, i) for i in ids])
+    after = conn.execute("SELECT COUNT(*) FROM collection_members WHERE collection_id=?",
+                         (cid,)).fetchone()[0]
+    return before - after
+
+
+def collection_rename(conn, cid, name):
+    name = _coll_name(name)
+    if not name:
+        return False
+    clash = conn.execute("SELECT id FROM collections WHERE name = ? COLLATE NOCASE AND id <> ?",
+                         (name, cid)).fetchone()
+    if clash:
+        return False
+    conn.execute("UPDATE collections SET name=? WHERE id=?", (name, cid))
+    return True
+
+
+def collection_delete(conn, cid):
+    """Delete the LIST. The files stay exactly where they are -- nothing here touches `images`."""
+    conn.execute("DELETE FROM collection_members WHERE collection_id=?", (cid,))
+    conn.execute("DELETE FROM collections WHERE id=?", (cid,))
+
+
 ANY_TAG_SQL = "(source='user' OR source LIKE 'ext:%')"
 
 _tag_state = {'running': False, 'seen': 0, 'total': 0, 'ok': 0, 'failed': 0,
@@ -3048,6 +3429,19 @@ _text_lock = threading.Lock()
 # ceiling on what one run will hold in memory rather than a limit on what may be asked.
 MAX_TEXT_ANSWERS = 500
 
+# THE APP'S BACKSTOP, not the destination's limit. A `post` extension declares its own cap as
+# `max_items` in its manifest, because the real number is a fact about the far end -- Civitai
+# refuses a post over 20 -- and the app has no business guessing it. This is only the ceiling for
+# an extension that declares nothing: every file is uploaded in full before anything is created, so
+# a selection of a thousand would be a very long run ending in a post nobody could edit.
+#
+# IT USED TO BE 50 AND IT USED TO TRUNCATE. Both were wrong. 50 was a guess about when Civitai's
+# editor gets unusable; the actual API refuses at 20, so a 50-file post ran until it was refused
+# part-way -- leaving the uploaded files on the account with no post created, which is the worst
+# outcome this path has. And truncating silently meant a selection of 60 posted 50 and never said
+# what happened to the other 10.
+MAX_POST_FILES = 50
+
 # What a text worker is told about the file besides its path. Read straight off the images row, so
 # this list can only ever name things the library already knows — an extension cannot ask the app
 # to go and work something out.
@@ -3120,6 +3514,154 @@ def run_text_batch(ext_id, ids):
     # is what a text extension not touching the library looks like from here.
     return run_ext_batch(ext_id, ids, _text_state, _text_lock, todo_for,
                          lambda conn, msg: _store_text(msg), ext['name'])
+
+
+# ---- Instance four of run_ext_batch: publishing ------------------------------------------------
+# THE ODD ONE AMONG THE ODD ONES. A score, a tag and an answer are all one-per-file; this run makes
+# ONE THING out of the whole selection, and that thing lives somewhere else. So what lands here is
+# a RECEIPT -- the id and URL of a post that now exists on a site where somebody who is not this
+# app can edit or delete it. Recording anything richer would be recording a guess about a remote
+# object we do not own.
+_post_state = {'running': False, 'seen': 0, 'total': 0, 'ok': 0, 'failed': 0,
+               'done': False, 'stopped': False, 'cancel': False,
+               'started_at': 0.0, 'ended_at': 0.0, 'error': None, 'last_error': None,
+               'device': None, 'ext': None, 'phase': None, 'post': None, 'fatal': None}
+_post_lock = threading.Lock()
+
+
+def _store_post(conn, msg, mark_published, title=''):
+    """One worker line. Control lines carry the phase and the receipt; a result line is one file
+    that finished uploading.
+
+    THE RECEIPT GOES IN `meta`, NOT IN A TAG. A `post:<id>` tag row would be erased by one click on
+    Clear machine tags, and a publishing record that vanishes with a tidy-up is worse than none.
+    `meta` is per-library, already exists, needs no migration, and nothing sweeps it.
+
+    This is the first real answer to "Published is a disposition, not a record": the label says THAT
+    you posted, this says WHICH post, when, and what went out alongside it.
+    """
+    if msg.get('control'):
+        if msg.get('phase'):
+            _post_state['phase'] = str(msg['phase'])[:200]
+        if msg.get('fatal'):
+            _post_state['fatal'] = str(msg['fatal'])[:600]
+        post = msg.get('post')
+        if isinstance(post, dict) and post.get('id'):
+            ids = [i for i in (post.get('ids') or []) if isinstance(i, int)]
+            _post_state['post'] = {'id': post['id'], 'url': post.get('url') or '',
+                                   'images': post.get('images') or len(ids),
+                                   'resource': post.get('resource') or ''}
+            conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)",
+                         ('civitai:post:%s' % post['id'],
+                          json.dumps({'url': post.get('url') or '', 'at': time.time(),
+                                      # WHAT YOU CALLED IT. Without this a log row is identified by
+                                      # its date alone, which is no use once there are two in a day.
+                                      'title': (title or '')[:200],
+                                      'files': len(ids),
+                                      # 'draft' RECORDS HOW IT WAS CREATED, not how it stands now.
+                                      # Nothing here hears about it again -- publish it on the site
+                                      # and this row cannot know -- so it is a fact about the past
+                                      # and the log must not present it as a current status.
+                                      'draft': True, 'ids': ids,
+                                      'resource': post.get('resource') or ''})))
+            # AND A REVERSE KEY PER FILE, so api_image is one lookup rather than a scan of every
+            # post ever made. The question a detail view asks is "which post was THIS in", and
+            # answering it by JSON-parsing every `civitai:post:*` row would get slower with use.
+            # A file posted twice keeps the LATEST post -- that is the draft you would want open.
+            conn.executemany("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)",
+                             [('civitai:image:%d' % i, str(post['id'])) for i in ids])
+            # THE APP SETS THE LABEL, NEVER THE WORKER. The guard in _store_tags stands: a worker
+            # may not emit `label:` and this one does not -- it reported a post id, and the app
+            # decided that being in a post means Published. Only on success, and only once.
+            if mark_published and ids:
+                # PUBLISHED IS A FLAG, so this ADDS and deletes nothing. Until 2026-09-21 it was a
+                # Status and this line cleared every label first -- posting a file marked To refine
+                # threw that mark away, every time, silently.
+                conn.executemany("INSERT OR IGNORE INTO tags(image_id, tag, source) "
+                                 "VALUES (?,'label:published','user')", [(i,) for i in ids])
+            return True
+        return False
+    return bool(msg.get('uploaded'))
+
+
+def _log_failed_post(state, compose, ids):
+    """A run that finished with no post. Written here because nothing else writes it down.
+
+    A SUCCESS ANNOUNCES ITSELF -- a dialog, a link, and a receipt row keyed by the post id. A
+    FAILURE said nothing at all: the job's error message went on screen once and was gone, so the
+    only record that you had tried was your own memory. That asymmetry is what made publishing feel
+    like a black box even though the successful half was fully recorded.
+
+    `fatal` is the WORKER'S OWN sentence and is preferred over the app's generic one, because it
+    distinguishes the two cases that need opposite advice: nothing was created, or something may
+    have been uploaded and left behind.
+    """
+    if state.get('post'):
+        return                                   # the receipt already holds this one
+    # THE STOP SENTENCE IS THE WHOLE POINT OF THE ROW, and it was one bare word. A stop is the one
+    # outcome that can leave files on the account with nothing to show for them -- the worker cannot
+    # say so, because a stop KILLS it before it can report anything -- so the app has to. It is the
+    # same sentence the run's own dialog shows, written once here and read by both.
+    STOPPED = ('Stopped. Anything already uploaded is left on Civitai, and no post was created.')
+    why = (state.get('fatal') or state.get('error')
+           or (STOPPED if state.get('stopped') else 'Nothing was posted.'))
+    at = time.time()
+    conn = db()
+    try:
+        conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)",
+                     ('postlog:fail:%.6f' % at,
+                      json.dumps({'ok': False, 'at': at, 'files': len(ids),
+                                  'title': (compose.get('title') or '')[:200],
+                                  'error': str(why)[:600],
+                                  'stopped': bool(state.get('stopped')),
+                                  # WHAT IT WOULD TAKE TO TRY AGAIN. The commonest failure is a
+                                  # setting you can fix in a minute -- no key, the wrong site --
+                                  # and without these a retry means reselecting the files and
+                                  # retyping everything you had written.
+                                  #
+                                  # THE IDS ARE ALREADY EXPANDED to the files that would be sent,
+                                  # so a retry sends exactly what this attempt did rather than
+                                  # re-expanding cards that may have changed since.
+                                  'ids': [i for i in ids if isinstance(i, int)][:200],
+                                  # The whole compose block, not just the title. There is nothing
+                                  # secret in it -- the API key is a SETTING and never travels
+                                  # here -- and a retry that lost the description would be a
+                                  # retry you had to redo by hand anyway.
+                                  'values': {k: v for k, v in (compose or {}).items()
+                                             if isinstance(v, (str, int, float, bool))}})))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def run_post_batch(ext_id, ids, compose):
+    """Publish a selection as one post. Instance four of run_ext_batch."""
+    ext = get_extension(ext_id)
+    if not ext or ext['produces'] != 'post':
+        return False
+
+    def todo_for(conn, wanted):
+        # ORDER IS THE SELECTION'S, NOT THE DATABASE'S. The first file becomes the post's cover, so
+        # "whatever SELECT ... IN returns" is not good enough -- it would silently reorder the post
+        # relative to the strip the user just looked at.
+        todo = []
+        for iid in wanted:
+            row = conn.execute("SELECT path FROM images WHERE id=?", (iid,)).fetchone()
+            if row:
+                todo.append({'id': iid, 'path': row['path']})
+        return todo
+
+    mark = bool(compose.get('mark_published'))
+    title = str(compose.get('title') or '')
+    _post_state.update(ext=ext['name'], phase=None, post=None, fatal=None)
+    return run_ext_batch(ext_id, ids, _post_state, _post_lock, todo_for,
+                         lambda conn, msg: _store_post(conn, msg, mark, title), ext['name'],
+                         compose=compose,
+                         on_done=lambda st: _log_failed_post(st, compose, ids))
+
+
+def stop_post():
+    _post_state['cancel'] = True
 
 
 def stop_text():
@@ -3461,6 +4003,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(_progress_snapshot(_reward_state))
             if p == '/api/tagger/status':
                 return self._json(_progress_snapshot(_tag_state))
+            if p == '/api/post/status':
+                st = _progress_snapshot(_post_state)
+                # The three things the client cannot work out for itself: what is happening now,
+                # the receipt when there is one, and the sentence explaining a run that ended with
+                # no post. A failed publish has one message for the whole run, not one per file --
+                # a partial upload posts nothing, so per-file errors would describe a post that
+                # does not exist.
+                for k in ('phase', 'post', 'fatal'):
+                    st[k] = _post_state.get(k)
+                return self._json(st)
             if p == '/api/text/status':
                 s = _progress_snapshot(_text_state)
                 # Only what the client has not seen. A poll every half-second that re-sent every
@@ -3498,6 +4050,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.api_setcull_preview(q)
             if p == '/api/setcull/status':
                 return self._json(_progress_snapshot(_setcull_state))
+            if p == '/api/post/log':
+                return self.api_post_log(q)
+            if p == '/api/groups':
+                return self.api_groups(q)
             if p == '/api/export/civitai/status':
                 return self.api_export_status()
             return self._json({'error': 'not found'}, 404)
@@ -3553,6 +4109,22 @@ class Handler(BaseHTTPRequestHandler):
             if p == '/api/setcull/stop':
                 stop_setcull()
                 return self._json({'ok': True})
+            if p == '/api/post/log/delete':
+                return self.api_post_log_delete()
+            if p == '/api/post/preview':
+                return self.api_post_preview()
+            if p == '/api/groups/state':
+                return self.api_group_state()
+            if p == '/api/groups/create':
+                return self.api_group_create()
+            if p == '/api/groups/add':
+                return self.api_group_add()
+            if p == '/api/groups/remove':
+                return self.api_group_remove()
+            if p == '/api/groups/rename':
+                return self.api_group_rename()
+            if p == '/api/groups/delete':
+                return self.api_group_delete()
             if p == '/api/export/civitai/prepare':
                 return self.api_export_prepare()
             if p == '/api/export/civitai/stop':
@@ -3613,6 +4185,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.api_tag_batch()
             if p == '/api/tagger/stop':
                 stop_tagging()
+                return self._json({'stopping': True})
+            if p == '/api/post/run':
+                return self.api_post_run()
+            if p == '/api/post/stop':
+                stop_post()
                 return self._json({'stopping': True})
             if p == '/api/text/ask':
                 return self.api_text_ask()
@@ -3691,6 +4268,15 @@ class Handler(BaseHTTPRequestHandler):
 
         Not cached: the docs change as often as the code, and this is read once per Help open."""
         name = (q.get('name') or [''])[0]
+        # AN EXTENSION'S OWN HELP, as `ext:<id>`. The id is matched against the extensions actually
+        # found on disk, never joined onto a path as sent -- `ext:..` must name nothing, not the
+        # folder above. Only the one fixed filename in that folder can be served.
+        if name.startswith('ext:'):
+            ext = next((e for e in list_extensions() if e['id'] == name[4:]), None)
+            if not ext or not ext['has_help']:
+                return self._json({'error': 'unknown doc'}, 404)
+            return self._file(os.path.join(EXT_DIR, ext['id'], 'HELP.md'),
+                              'text/markdown; charset=utf-8')
         fn = HELP_DOCS.get(name)
         if not fn:
             return self._json({'error': 'unknown doc'}, 404)
@@ -3722,7 +4308,9 @@ class Handler(BaseHTTPRequestHandler):
                     'cards': _effective_cards(),
                     'cards_defaults': [dict(r) for r in DEFAULT_CARD_FACTS],
                     'snapshots': CONFIG['snapshots'],
-                    'labels': LABELS,
+                    'labels': LABELS,          # the union, for anything that just wants the list
+                    'status': STATUS,          # exactly one per file
+                    'flags': FLAGS,            # any number per file
                     'extensions': _extensions_payload(),
                     'metric_range': list(METRIC_RANGE),
                     'app_name': APP_NAME,
@@ -3907,6 +4495,166 @@ class Handler(BaseHTTPRequestHandler):
             run_scan()
             scanning = True
         self._json({'ok': True, 'active': key, 'scanning': scanning})
+
+    # ---- Groups ---------------------------------------------------------------------------
+    # THE ROUTES SAY `groups`, THE CODE UNDER THEM SAYS `collection`. That is the one translation
+    # in this feature and it stops here: the client never sees the word collection, and the index
+    # never sees the word group (where it already means a Set). See the schema note in index_db.
+    def api_groups(self, q):
+        """Every group with its count. `for` is an optional image id, which adds `has` per row so
+        the picker can show what this file is already in.
+
+        BLIND TO ITS OWN SELECTION, exactly like the Labels list and for the same reason: Groups
+        are exclusive, so counting them under the group you already picked would make every other
+        one read 0 and the list would stop being usable to move between them. api_tags calls this
+        filters_without(); here there is only one list, so dropping the one key is the whole of it.
+        """
+        try:
+            iid = int(q.get('for', [''])[0] or 0)
+        except (TypeError, ValueError):
+            iid = 0
+        q2 = dict(q or {})
+        q2.pop('coll', None)
+        joins, wsql, params = self._filters(q2)
+        # NOTHING NARROWING MEANS NO JOIN -- the same fast path api_tags takes, and for the same
+        # two cases: boot has no filters by definition, and Reset all clears them by definition.
+        # With no WHERE and no JOIN there is no predicate, so the subquery could only re-find every
+        # row it started with.
+        plain = not wsql and not joins.strip()
+        matching = None if plain else 'SELECT i.id FROM images i %s %s' % (joins, wsql)
+        conn = db()
+        try:
+            self._json({'groups': list_collections(conn, iid or None, matching, params)})
+        finally:
+            conn.close()
+
+    def _group_ids(self, body):
+        """The ids a group call acts on, filtered to integers. Shared so every route agrees."""
+        return [i for i in (body.get('ids') or []) if isinstance(i, int)]
+
+    # THE WRITERS DO NOT ECHO THE LIST. They cannot: the counts belong to the caller's current
+    # filters, which a POST body does not carry, and an unfiltered list adopted by the client
+    # would silently replace every number in the rail with a whole-library total. The client
+    # re-asks /api/groups instead -- the same arrangement every tag writer has with loadTags().
+    def api_group_state(self):
+        """How many of THESE files each group already holds.
+
+        A POST for a read, because the id list is the payload: "Select all matching" reaches past
+        the loaded page and can hand over thousands, which is not a query string.
+
+        This is what lets one control both add and remove. The picker needs three states per group
+        -- all of the selection, some of it, none -- because the rule the app already uses for
+        labels is "toggle off only when every selected item already has it, else set it", and
+        `some` is the case that rule exists to resolve.
+
+        NOT carried on the grid payload instead: that would put a per-file group list on every one
+        of 110k rows to answer a question only the picker asks, about at most a few hundred of them.
+        """
+        body = self._read_json()
+        ids = [i for i in (body.get('ids') or []) if isinstance(i, int)]
+        conn = db()
+        try:
+            if not ids:
+                return self._json({'state': {}})
+            # Counted in one pass with the ids in a temp table rather than one query per group:
+            # a hundred groups against a thousand ids is one scan of the membership rows, not a
+            # hundred.
+            conn.execute("CREATE TEMP TABLE IF NOT EXISTS _sel(id INTEGER PRIMARY KEY)")
+            conn.execute("DELETE FROM _sel")
+            conn.executemany("INSERT OR IGNORE INTO _sel(id) VALUES(?)", [(i,) for i in ids])
+            rows = conn.execute(
+                "SELECT m.collection_id AS cid, COUNT(*) AS n FROM collection_members m "
+                "JOIN _sel s ON s.id = m.image_id GROUP BY m.collection_id").fetchall()
+            self._json({'state': {str(r['cid']): r['n'] for r in rows}, 'of': len(set(ids))})
+        finally:
+            conn.close()
+
+    def api_group_create(self):
+        """Make a group, optionally filling it in the same call.
+
+        ONE CALL, because the picker's "make this and put my selection in it" is one gesture. Two
+        calls would mean an empty group left behind whenever the second one failed.
+        """
+        body = self._read_json()
+        conn = db()
+        try:
+            g = collection_create(conn, body.get('name'))
+            if not g:
+                return self._json({'error': 'That name cannot be used, or there are too many '
+                                            'groups already.'}, 400)
+            ids = self._group_ids(body)
+            added = collection_add(conn, g['id'], ids) if ids else 0
+            conn.commit()
+            self._json({'ok': True, 'group': g, 'added': added})
+        finally:
+            conn.close()
+
+    def api_group_add(self):
+        body = self._read_json()
+        ids = self._group_ids(body)
+        try:
+            cid = int(body.get('id') or 0)
+        except (TypeError, ValueError):
+            cid = 0
+        if not cid or not ids:
+            return self._json({'error': 'need a group and some files'}, 400)
+        conn = db()
+        try:
+            added = collection_add(conn, cid, ids)
+            conn.commit()
+            self._json({'ok': True, 'added': added})
+        finally:
+            conn.close()
+
+    def api_group_remove(self):
+        body = self._read_json()
+        ids = self._group_ids(body)
+        try:
+            cid = int(body.get('id') or 0)
+        except (TypeError, ValueError):
+            cid = 0
+        if not cid or not ids:
+            return self._json({'error': 'need a group and some files'}, 400)
+        conn = db()
+        try:
+            gone = collection_remove(conn, cid, ids)
+            conn.commit()
+            self._json({'ok': True, 'removed': gone})
+        finally:
+            conn.close()
+
+    def api_group_rename(self):
+        body = self._read_json()
+        try:
+            cid = int(body.get('id') or 0)
+        except (TypeError, ValueError):
+            cid = 0
+        conn = db()
+        try:
+            if not cid or not collection_rename(conn, cid, body.get('name')):
+                return self._json({'error': 'That name is already taken, or is empty.'}, 400)
+            conn.commit()
+            self._json({'ok': True})
+        finally:
+            conn.close()
+
+    def api_group_delete(self):
+        """Delete the list. NOTHING HERE TOUCHES `images` -- the confirm in the client promises
+        the files stay put, and this is the code that has to keep that promise."""
+        body = self._read_json()
+        try:
+            cid = int(body.get('id') or 0)
+        except (TypeError, ValueError):
+            cid = 0
+        if not cid:
+            return self._json({'error': 'need a group'}, 400)
+        conn = db()
+        try:
+            collection_delete(conn, cid)
+            conn.commit()
+            self._json({'ok': True})
+        finally:
+            conn.close()
 
     def api_root_rename(self):
         body = self._read_json()
@@ -4173,6 +4921,26 @@ class Handler(BaseHTTPRequestHandler):
             where.append("EXISTS (SELECT 1 FROM tags tg WHERE tg.image_id=i.id AND tg.source='fav')")
         if q.get('note', [''])[0] == '1':      # "Has notes" — same emptiness test the ✎ card mark uses
             where.append("i.note IS NOT NULL AND TRIM(i.note) <> ''")
+        # GROUP (stored as a collection). Reads `coll` and NOT `group`, which was already taken by
+        # the Video-pairs toggle years before this filter existed -- `q.get('group')` a few lines
+        # up is that switch, and reusing the name would have made "show me this group" mean
+        # "collapse pairs" to half the query builder.
+        #
+        # ONE AT A TIME, so this is an id rather than a list. Several would have to answer AND or
+        # OR in the UI before it could be answered here, and nothing asks for it yet -- the radio
+        # in the rail is the promise that this stays a single value.
+        #
+        # An EXISTS like the tag filter above, not a JOIN: a JOIN would multiply rows if the
+        # membership table ever gained a second row per pair, and the question is only whether the
+        # file is in the group.
+        try:
+            _coll = int(q.get('coll', [''])[0] or 0)
+        except (TypeError, ValueError):
+            _coll = 0
+        if _coll:
+            where.append("EXISTS (SELECT 1 FROM collection_members cm "
+                         "WHERE cm.image_id = i.id AND cm.collection_id = ?)")
+            params.append(_coll)
         # Aspect. Both numbers are already on the row for every image AND every video, so this is one
         # integer comparison per row the query was going to read anyway -- no new column, no index,
         # nothing to backfill. It reads WHAT A CARD CONTAINS, like every filter but File type: any
@@ -4390,7 +5158,11 @@ class Handler(BaseHTTPRequestHandler):
             "qs.reward AS reward, "
             # exclusive curation label slug (label:<slug> tag, 'label:' stripped), or NULL
             "(SELECT SUBSTR(tg.tag,7) FROM tags tg WHERE tg.image_id=i.id AND tg.source='user' "
-            "AND tg.tag LIKE 'label:%' LIMIT 1) AS label, "
+            "AND tg." + _STATUS_SQL + " LIMIT 1) AS label, "
+            # Flags are independent of the status, so they cannot ride that column: a comma list of
+            # every flag the file carries, for the card band when it has no status.
+            "(SELECT GROUP_CONCAT(SUBSTR(tg.tag,7)) FROM tags tg WHERE tg.image_id=i.id "
+            "AND tg.source='user' AND tg.tag LIKE 'label:%' AND NOT tg." + _STATUS_SQL + ") AS flags, "
             "i.note AS note, (i.note IS NOT NULL AND i.note != '') AS has_note, "
             # Random's collapsed ORDER BY names this, so it has to survive into the CTE.
             "i.shuffle_key, i.set_stage, "
@@ -4818,7 +5590,8 @@ class Handler(BaseHTTPRequestHandler):
             'duration': (r['duration'] if r['duration'] is not None
                          else _vf(r, 'duration')),
             'has_meta': r['has_meta'], 'fav': r['fav'], 'reward': r['reward'],
-            'label': r['label'], 'has_note': r['has_note'], 'note': r['note'],
+            'label': r['label'], 'flags': r['flags'].split(',') if r['flags'] else [],
+            'has_note': r['has_note'], 'note': r['note'],
             'motion': r['motion'], 'is_video': (r['ext'] or '').lower() in index_db.VIDEO_EXTS,
             'group_count': (r['group_count'] if collapse else 1),
             'video_id': (r['video_id'] if collapse else None),
@@ -4878,7 +5651,12 @@ class Handler(BaseHTTPRequestHandler):
             d['loras'] = []
         d['tags'] = [row['tag'] for row in conn.execute(
             "SELECT tag FROM tags WHERE image_id=? AND source='user' ORDER BY tag COLLATE NOCASE", (iid,))]
-        d['label'] = next((t[6:] for t in d['tags'] if t.startswith('label:')), None)   # exclusive curation label
+        # The STATUS (at most one) and the FLAGS (any number) are separate fields, because they
+        # answer different questions and the client draws them in different places.
+        d['label'] = next((t[6:] for t in d['tags']
+                           if t.startswith('label:') and t[6:] in _STATUS_SLUGS), None)
+        d['flags'] = [t[6:] for t in d['tags']
+                      if t.startswith('label:') and t[6:] not in _STATUS_SLUGS]
         # Machine tags ride in their own field rather than joining d['tags']: that list carries the
         # label row and is what the tag editor writes back, so mixing in rows the user did not make
         # would put them one careless save away from becoming his.
@@ -4890,6 +5668,30 @@ class Handler(BaseHTTPRequestHandler):
             "SELECT 1 FROM tags WHERE image_id=? AND source='fav'", (iid,)).fetchone() is not None
         qr = conn.execute("SELECT reward FROM quality WHERE image_id=?", (iid,)).fetchone()
         d['quality'] = ({'reward': qr['reward']} if qr else None)
+        # WHICH GROUPS THIS FILE IS IN. The detail panel is the only surface that answers it -- the
+        # rail says what is IN a group, this says what a file BELONGS TO, and neither substitutes
+        # for the other. Ordered by name to match the rail; one indexed read on
+        # idx_collection_members_image, which exists for exactly this question.
+        d['groups'] = [{'id': r['id'], 'name': r['name']} for r in conn.execute(
+            "SELECT c.id, c.name FROM collection_members m JOIN collections c "
+            "ON c.id = m.collection_id WHERE m.image_id = ? ORDER BY c.name COLLATE NOCASE",
+            (iid,))]
+        # The publishing receipt, if this file went out in one. `Published` is a disposition -- it
+        # says THAT you posted; this says which post, when, and what went with it. Two keyed reads,
+        # no scan. Absent for every file that has not been posted, which is nearly all of them.
+        d['post'] = None
+        pid = conn.execute("SELECT value FROM meta WHERE key=?", ('civitai:image:%d' % iid,)).fetchone()
+        if pid:
+            prow = conn.execute("SELECT value FROM meta WHERE key=?",
+                                ('civitai:post:%s' % pid['value'],)).fetchone()
+            if prow:
+                try:
+                    pj = json.loads(prow['value'])
+                    d['post'] = {'url': pj.get('url') or '', 'at': pj.get('at') or 0,
+                                 'images': len(pj.get('ids') or []),
+                                 'resource': pj.get('resource') or ''}
+                except Exception:
+                    pass
         # Sibling ids of a group, so a detail-view recycle can take the whole group. For an image
         # SET (a group with no video member) also return per-member role info, in ordinal order, so
         # the detail view can render the side-by-side cull panes.
@@ -5811,7 +6613,10 @@ class Handler(BaseHTTPRequestHandler):
             half of the table comes back, since labels ride it as `label:<slug>`."""
             joins, wsql, params = filters_without(drop)
             plain = not wsql and not joins.strip()
-            half = ("t.tag LIKE 'label:%'" if only_labels else "t.tag NOT LIKE 'label:%'")
+            # A RANGE, not LIKE: LIKE is case-insensitive, so it cannot use the index and the label
+            # half scanned every tag row to find a handful. The range is a seek.
+            half = ("t.tag >= 'label:' AND t.tag < 'label;'" if only_labels
+                    else "NOT (t.tag >= 'label:' AND t.tag < 'label;')")
             matching = f"t.image_id IN (SELECT i.id FROM images i {joins} {wsql})"
             key = (plain, wsql, tuple(params), only_labels)
             if key in _built:
@@ -5859,12 +6664,25 @@ class Handler(BaseHTTPRequestHandler):
         # Tags blind to the tag ticks; labels blind to the label pick. One list, as before, because
         # the client already knows a `label:` row belongs in the Labels section -- and the tag half
         # keeps its own ordering, which is the half anyone reads in order.
-        with self._phase('taglist'):
-            tags = count_rows('none', only_labels=False) + count_rows('label', only_labels=True)
-        with self._phase('fav'):
-            fsql = "SELECT COUNT(*) c FROM tags t WHERE t.source='fav'" if plain \
-                else f"SELECT COUNT(*) c FROM tags t WHERE {matching} AND t.source='fav'"
-            fav = conn.execute(fsql, () if plain else params).fetchone()['c']
+        #
+        # TWO PARTS, ASKED FOR SEPARATELY (`part=labels` / `part=tags`, both when absent). The Labels
+        # tab shows six numbers, and until 2026-09-23 it waited on the tag half too: a full pass
+        # over every tag row, 3,053ms in his trace with no filter on at all. The label half and the
+        # favourite count are index seeks, so that tab no longer pays for the other one.
+        part = (q.get('part', [''])[0] or '')
+        tags, fav = [], None
+        if part in ('', 'tags'):
+            with self._phase('taglist'):
+                tags += count_rows('none', only_labels=False)
+        if part in ('', 'labels'):
+            with self._phase('labels'):
+                tags += count_rows('label', only_labels=True)
+            with self._phase('fav'):
+                # `tag='favorite'` makes this a seek on (tag, source, image_id) rather than a pass
+                # over the whole table; every fav row carries it (see api_favorite).
+                fsql = "SELECT COUNT(*) c FROM tags t WHERE t.tag='favorite' AND t.source='fav'"
+                fav = conn.execute(fsql if plain else f"{fsql} AND {matching}",
+                                   () if plain else params).fetchone()['c']
         conn.close()
         self._json({'tags': tags, 'favorites': fav})
 
@@ -5900,11 +6718,31 @@ class Handler(BaseHTTPRequestHandler):
         if slug is not None and slug not in _LABEL_SLUGS:
             return self._json({'error': f'unknown label: {slug}'}, 400)
         conn = db()
-        conn.executemany("DELETE FROM tags WHERE image_id=? AND source='user' AND tag LIKE 'label:%'",
-                         [(i,) for i in ids])
-        if slug:
-            conn.executemany("INSERT OR IGNORE INTO tags(image_id, tag, source) VALUES (?,?,'user')",
-                             [(i, 'label:' + slug) for i in ids])
+        # STATUS ROWS ONLY. A flag is not competing for this slot -- clearing the status of a file
+        # you have published must leave Published standing.
+        if slug in _STATUS_SLUGS or slug is None:
+            conn.executemany("DELETE FROM tags WHERE image_id=? AND source='user' AND %s"
+                             % _STATUS_SQL, [(i,) for i in ids])
+            if slug:
+                conn.executemany("INSERT OR IGNORE INTO tags(image_id, tag, source) VALUES (?,?,'user')",
+                                 [(i, 'label:' + slug) for i in ids])
+        else:
+            # A flag TOGGLES: the same call that sets it clears it, which is what a mark with no
+            # opposite needs. Every id follows the FIRST one, so a mixed selection lands in one
+            # state rather than inverting file by file.
+            tag = 'label:' + slug
+            on = conn.execute("SELECT 1 FROM tags WHERE image_id=? AND source='user' AND tag=?",
+                              (ids[0], tag)).fetchone() is not None
+            if on:
+                conn.executemany("DELETE FROM tags WHERE image_id=? AND source='user' AND tag=?",
+                                 [(i, tag) for i in ids])
+            else:
+                conn.executemany("INSERT OR IGNORE INTO tags(image_id, tag, source) VALUES (?,?,'user')",
+                                 [(i, tag) for i in ids])
+            conn.commit()
+            conn.close()
+            # The page cannot know which way a toggle went without this.
+            return self._json({'ok': True, 'label': slug, 'on': not on})
         conn.commit()
         conn.close()
         self._json({'ok': True, 'label': slug})
@@ -5955,7 +6793,8 @@ class Handler(BaseHTTPRequestHandler):
         """Compute old->new names (in-place, same folder), auto-numbering collisions."""
         qmarks = ','.join('?' * len(ids))
         rows = {r['id']: r for r in conn.execute(
-            f"SELECT id, path, folder, filename FROM images WHERE id IN ({qmarks})", ids)}
+            f"SELECT id, path, rel_path, folder, filename FROM images WHERE id IN ({qmarks})",
+            ids)}
         claimed = set()   # lower-cased new abs paths taken during this batch
         plan = []
         for iid in ids:
@@ -5983,7 +6822,8 @@ class Handler(BaseHTTPRequestHandler):
             new_abs = os.path.join(folder_abs, cand)
             claimed.add(new_abs.lower())
             plan.append({'id': iid, 'old': name, 'new': cand, 'status': 'rename',
-                         'old_path': old_path, 'new_path': new_abs})
+                         'old_path': old_path, 'new_path': new_abs,
+                         'old_rel': r['rel_path'] or ''})
         return plan
 
     def api_rename(self):
@@ -5999,7 +6839,6 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
             return self._json({'plan': [{k: p[k] for k in ('id', 'old', 'new', 'status')} for p in plan],
                                'changes': sum(1 for p in plan if p['status'] == 'rename')})
-        root = ACTIVE['path'] or ''
         renamed, errors = 0, []
         for p in plan:
             if p['status'] != 'rename':
@@ -6009,43 +6848,66 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 errors.append({'old': p['old'], 'error': str(e)})
                 continue
-            # Every column the FTS indexes has to be re-supplied below, `lyrics` included: this path
-            # deletes the row from the index and puts it back with a new filename, so a column
-            # missing here is a value silently dropped from search by a rename.
-            meta = conn.execute("SELECT positive, model_name, folder, lyrics FROM images WHERE id=?",
-                                (p['id'],)).fetchone()
-            index_db._fts_delete(conn, p['id'])
-            rel = os.path.relpath(p['new_path'], root) if root else p['new']
-            conn.execute("UPDATE images SET path=?, rel_path=?, filename=? WHERE id=?",
-                         (p['new_path'], rel, p['new'], p['id']))
-            index_db._fts_insert(conn, p['id'], meta['positive'], meta['model_name'], p['new'],
-                                 meta['folder'], meta['lyrics'])
-            try:  # move the cached thumbnail to its new key so it isn't regenerated
-                old_t = os.path.join(THUMBS_DIR, thumbs_mod.thumb_rel(p['old_path']))
-                new_t = os.path.join(THUMBS_DIR, thumbs_mod.thumb_rel(p['new_path']))
-                if os.path.exists(old_t):
-                    os.makedirs(os.path.dirname(new_t), exist_ok=True)
-                    os.replace(old_t, new_t)
-            except Exception:
-                pass
+            # ONCE THE FILE HAS MOVED, THE ROW MUST FOLLOW OR THE LIBRARY IS WRONG. Everything from
+            # here on is bookkeeping about a rename that has already happened on disk, so a failure
+            # in it cannot be allowed to abandon the loop: doing so left this file AND every file
+            # renamed before it pointing at names that no longer exist, un-committed, which is how
+            # one ValueError turned into a run of renames that "failed differently every time".
+            # Reported per file, and the run carries on.
+            try:
+                self._rename_bookkeeping(conn, p)
+            except Exception as e:
+                errors.append({'old': p['old'], 'error': 'renamed on disk, but the library was not '
+                                                         'updated: %s' % e})
+                continue
             renamed += 1
         conn.commit()
         conn.close()
         self._json({'renamed': renamed, 'errors': errors})
 
+    def _rename_bookkeeping(self, conn, p):
+        """The row, the search index and the cached thumbnail, after a file has been renamed."""
+        # Every column the FTS indexes has to be re-supplied below, `lyrics` included: this path
+        # deletes the row from the index and puts it back with a new filename, so a column
+        # missing here is a value silently dropped from search by a rename.
+        meta = conn.execute("SELECT positive, model_name, folder, lyrics FROM images WHERE id=?",
+                            (p['id'],)).fetchone()
+        index_db._fts_delete(conn, p['id'])
+        # THE NEW REL_PATH IS THE OLD ONE WITH ITS LAST SEGMENT SWAPPED. It used to be
+        # recomputed with os.path.relpath against ACTIVE['path'], which is the ACTIVE library's
+        # root and not necessarily the FILE's -- a merged library holds roots on several drives,
+        # and relpath across two of them raises ValueError ("path is on mount 'D:', start on
+        # mount 'A:'"). That threw after os.rename had already succeeded, so the file was
+        # renamed on disk while its row still named the old one, which is why the next attempt
+        # failed differently every time.
+        #
+        # A rename does not move a file between folders, so no root is needed to answer this:
+        # the directory part of rel_path is unchanged by construction, and this cannot raise.
+        head = (p['old_rel'] or '').replace('\\', '/').rsplit('/', 1)
+        rel = (head[0] + '/' + p['new']) if len(head) == 2 else p['new']
+        conn.execute("UPDATE images SET path=?, rel_path=?, filename=? WHERE id=?",
+                     (p['new_path'], rel, p['new'], p['id']))
+        index_db._fts_insert(conn, p['id'], meta['positive'], meta['model_name'], p['new'],
+                             meta['folder'], meta['lyrics'])
+        try:  # move the cached thumbnail to its new key so it isn't regenerated
+            old_t = os.path.join(THUMBS_DIR, thumbs_mod.thumb_rel(p['old_path']))
+            new_t = os.path.join(THUMBS_DIR, thumbs_mod.thumb_rel(p['new_path']))
+            if os.path.exists(old_t):
+                os.makedirs(os.path.dirname(new_t), exist_ok=True)
+                os.replace(old_t, new_t)
+        except Exception:
+            pass
+
     # -- Settings -> Extensions ------------------------------------------------
     def api_ext_enable(self):
-        """Turn one extension on or off. Only OFF is stored — see _normalize_config."""
+        """Turn one extension on or off. Both are stored: off is the default, so ON is the fact."""
         b = self._read_json()
         ext_id = str(b.get('id') or '').strip()
         ext = get_extension(ext_id) if ext_id else None
         if not ext:
             return self._json({'error': 'no such extension'}, 404)
         exts = dict(CONFIG.get('extensions', {}))
-        if b.get('enabled'):
-            exts.pop(ext_id, None)
-        else:
-            exts[ext_id] = False
+        exts[ext_id] = bool(b.get('enabled'))
         CONFIG['extensions'] = exts
         save_config()
         self._json({'ok': True, 'extensions': _extensions_payload()})
@@ -6132,6 +6994,208 @@ class Handler(BaseHTTPRequestHandler):
         if not run_tag_batch(ext_id, ids, skip_tagged=b.get('skip_tagged', True)):
             return self._json({'error': 'Could not start %s.' % ext['name']}, 400)
         self._json({'started': True, 'ext': ext['name']})
+
+    # -- publishing a selection as one post --
+    def api_post_run(self):
+        """Publish these files, as ONE post, in the order given.
+
+        THE IDS ARE EXPANDED into each card's members, which is the opposite of api_text_ask right
+        above — and the difference is deliberate rather than an oversight. There, a card is one
+        picture and three stages of a set are the same image three times, so expanding would ask
+        the same question three times. Here, a paired card is a VIDEO AND THE STILL FROM THE SAME
+        RUN, and posting both is the only way the run's LoRA is credited at all: Civitai reads
+        resources out of a file, an MP4 carries none, and the create call takes one model version
+        with no array form. Collapse the pair and the post loses everything but the checkpoint.
+        """
+        b = self._read_json()
+        ext_id = str(b.get('ext') or '').strip()
+        ids = _post_ids(b, self._ids_from(b))
+        if not ids:
+            return self._json({'error': 'no ids'}, 400)
+        ext = get_extension(ext_id) if ext_id else None
+        if not ext or not ext['active'] or ext['produces'] != 'post':
+            return self._json({'error': "That extension isn't available — switch it on in "
+                                        "Settings → Extensions."}, 400)
+        # REFUSED, NOT TRUNCATED, AND BEFORE THE FIRST BYTE. The worker uploads every file and only
+        # then creates the post, so a run that overruns the cap is refused part-way and leaves what
+        # it has already sent sitting on the account with nothing to show for it. There is no undo
+        # for that from this end.
+        #
+        # THE NUMBER IS COUNTED IN FILES, WHICH IS NOT WHAT THE USER SELECTED. A paired card is a
+        # video AND its still, and both go (it is the only way the run's LoRA is credited), so 12
+        # selected cards can be 20 files. The message says the file count for that reason -- a
+        # refusal quoting a number the user cannot see on screen is a refusal they cannot act on.
+        cap = ext['max_items'] or MAX_POST_FILES
+        if len(ids) > cap:
+            return self._json({'error': '%s takes at most %d files in one post, and this is %d. '
+                                        '(A video and its still both go, so some cards count '
+                                        'twice.) Deselect some, or turn Sets off to pick single '
+                                        'files.' % (ext['name'], cap, len(ids))}, 400)
+        if _post_state['running']:
+            return self._json({'error': 'It is still posting the last one.'}, 409)
+        # Only keys the manifest declares, coerced to the declared type. The worker is about to be
+        # handed these as configuration, so an undeclared key would be a way to put arbitrary
+        # values in front of it from the page.
+        compose = merge_ext_values(ext, b.get('values') or {}, {}, fields=ext.get('compose') or [])
+        if not run_post_batch(ext_id, ids, compose):
+            return self._json({'error': 'Could not start %s.' % ext['name']}, 400)
+        self._json({'started': True, 'ext': ext['name'], 'total': len(ids)})
+
+    def api_post_log(self, q):
+        """Everything this library has published, newest first, successes and failures together.
+
+        WHY A LOG AT ALL. The author, 2026-09-22: "without that, the publishing is a bit of a black
+        box." A success already had a receipt -- it was simply never shown as a list -- and a
+        failure had nothing at all.
+
+        TWO KEY SHAPES, READ AS ONE LIST, and the split is history rather than design: successes
+        have been written to `civitai:post:<id>` since posting shipped, keyed by the post id so
+        api_image can answer "which post was this file in" with one lookup. Failures have no post
+        id to be keyed by, so they go under `postlog:fail:<when>`. Migrating the old rows to a
+        shared prefix would buy tidiness and cost the receipts every existing post already has.
+
+        `civitai:` in that first prefix names one extension, which is the wart to know about: this
+        endpoint is drawn for any `produces: "post"` extension, but the stored rows predate there
+        being a second one. Worth unpicking the day there is.
+
+        NO STATUS FETCHED FROM THE FAR END. A row says what happened when it happened; whether a
+        draft has since been published is a question only Civitai can answer, and answering it
+        would mean a network call per row on a settings page.
+        """
+        try:
+            limit = max(1, min(500, int(q.get('limit', ['100'])[0] or 100)))
+        except (TypeError, ValueError):
+            limit = 100
+        conn = db()
+        try:
+            out = []
+            for k, v in conn.execute(
+                    "SELECT key, value FROM meta WHERE key LIKE 'civitai:post:%' "
+                    "OR key LIKE 'postlog:fail:%'"):
+                try:
+                    j = json.loads(v)
+                except (TypeError, ValueError):
+                    continue
+                if k.startswith('postlog:fail:'):
+                    out.append({'key': k, 'ok': False, 'at': j.get('at') or 0,
+                                'title': j.get('title') or '', 'files': j.get('files') or 0,
+                                'error': j.get('error') or '', 'stopped': bool(j.get('stopped')),
+                                # Absent on a failure recorded before retry existed: such a row
+                                # lists normally and simply offers no Retry.
+                                'ids': [i for i in (j.get('ids') or []) if isinstance(i, int)],
+                                'values': j.get('values') or {}})
+                else:
+                    ids = j.get('ids') or []
+                    out.append({'key': k, 'ok': True, 'at': j.get('at') or 0,
+                                'post_id': k.rsplit(':', 1)[-1],
+                                'title': j.get('title') or '',
+                                # `files` was added later; fall back to the id list, which every
+                                # row has always carried.
+                                'files': j.get('files') or len(ids),
+                                'url': j.get('url') or '',
+                                'resource': j.get('resource') or '',
+                                'draft': bool(j.get('draft'))})
+            out.sort(key=lambda r: r['at'], reverse=True)
+            self._json({'entries': out[:limit], 'total': len(out)})
+        finally:
+            conn.close()
+
+    def api_post_log_delete(self):
+        """Forget these log entries. NOTHING ON CIVITAI IS TOUCHED.
+
+        That sentence is the whole contract and the client's confirm says it too: this deletes the
+        record at THIS end, and the post on the site is not ours to delete -- it lives somewhere a
+        person who is not this app can edit.
+
+        DELETING A SUCCESS ALSO FORGETS IT PER FILE. Each posted file carries a reverse key
+        (`civitai:image:<id>`) pointing at the receipt, which is what puts the Posted row in the
+        detail panel. Leaving those behind would point at a receipt that no longer exists -- the
+        panel would quietly show nothing and the rows would sit there forever with nothing able to
+        reach them. So "forget this post" means forget it everywhere, which is also the only
+        reading under which the confirm is honest.
+
+        THE PREFIXES ARE A WHITELIST, not a formality. This endpoint is handed keys by the page, and
+        `meta` also holds schema_version, the per-root scan signatures and the reader version --
+        rows that would break the index or silently trigger a full re-read if deleted. Only the two
+        families the log itself lists may be named here.
+        """
+        b = self._read_json()
+        keys = [str(k) for k in (b.get('keys') or []) if isinstance(k, str)]
+        keys = [k for k in keys if k.startswith('civitai:post:') or k.startswith('postlog:fail:')]
+        if not keys:
+            return self._json({'error': 'nothing to delete'}, 400)
+        conn = db()
+        try:
+            gone = 0
+            for k in keys:
+                if k.startswith('civitai:post:'):
+                    pid = k.rsplit(':', 1)[-1]
+                    row = conn.execute("SELECT value FROM meta WHERE key=?", (k,)).fetchone()
+                    if row:
+                        try:
+                            ids = json.loads(row['value']).get('ids') or []
+                        except (TypeError, ValueError):
+                            ids = []
+                        # Only the files still pointing at THIS post. A file posted twice keeps the
+                        # latest, so one that has since gone out again must keep its newer receipt.
+                        for iid in ids:
+                            if not isinstance(iid, int):
+                                continue
+                            cur = conn.execute("SELECT value FROM meta WHERE key=?",
+                                               ('civitai:image:%d' % iid,)).fetchone()
+                            if cur and str(cur['value']) == str(pid):
+                                conn.execute("DELETE FROM meta WHERE key=?",
+                                             ('civitai:image:%d' % iid,))
+                if conn.execute("DELETE FROM meta WHERE key=?", (k,)).rowcount:
+                    gone += 1
+            conn.commit()
+            self._json({'ok': True, 'deleted': gone})
+        finally:
+            conn.close()
+
+    def api_post_preview(self):
+        """EXACTLY the files a post would send, in the order they would go.
+
+        POSTING WORKS IN FILES, NOT CARDS -- the author's call, 2026-09-22 -- and this endpoint is what
+        makes that visible rather than merely true. The dialog's strip used to be built client-side
+        from the loaded grid, so it drew one thumbnail per CARD: a card's other members had no
+        entry at all, and neither did anything selected past the loaded page. You could look at six
+        pictures and send eleven files.
+
+        A card quietly holds more than its face in more ways than one: a still+video pair, an image
+        set, and an LTX run's silent video sitting beside the one with audio. Every one of those
+        goes out, and until now none of them was on screen before it went.
+
+        `came_with` marks a file the selection did not name -- it arrived because a card pulled it
+        in. That is the flag the strip needs: those are the files nobody chose and nobody saw.
+        """
+        b = self._read_json()
+        asked = self._ids_from(b)
+        if not asked:
+            return self._json({'files': [], 'total': 0})
+        ids = _post_ids(b, asked)
+        named = set(asked)
+        conn = db()
+        try:
+            rows = {r['id']: r for r in conn.execute(
+                "SELECT id, filename, ext, mtime, root_id FROM images WHERE id IN (%s)"
+                % ','.join('?' * len(ids)), ids)}
+        finally:
+            conn.close()
+        out = []
+        for iid in ids:
+            r = rows.get(iid)
+            if not r:
+                continue
+            out.append({
+                'id': iid,
+                'name': r['filename'] or '',
+                'ext': (r['ext'] or '').lower(),
+                'thumb_url': '/thumb/%d?v=%d&r=%s&s=128' % (iid, int(r['mtime'] or 0),
+                                                            r['root_id'] or ''),
+                'came_with': iid not in named,
+            })
+        self._json({'files': out, 'total': len(out), 'asked': len(named)})
 
     # -- asking a text extension about a file, or about a selection --
     def api_text_ask(self):

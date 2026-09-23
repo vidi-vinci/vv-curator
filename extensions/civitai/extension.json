@@ -1,0 +1,81 @@
+{
+  "name": "Post to Civitai",
+  "version": "1.0",
+  "description": "Posts the files you have selected to Civitai as one draft. Sends those files and your API key to Civitai, and only when you press Post. Nothing goes public until you publish it there yourself.",
+  "produces": "post",
+  "worker": "worker.py",
+  "test": true,
+  "_max_items": "Civitai refuses a post over 20 files. The app refuses BEFORE uploading, because the worker sends every file and only then creates the post — overrunning the cap leaves the uploaded files on the account with no post made. A video and its still both count.",
+  "max_items": 20,
+  "settings": [
+    {
+      "key": "api_key",
+      "label": "Key",
+      "type": "password",
+      "placeholder": "paste your Civitai API key",
+      "help": "From Civitai → account settings → API keys. Give it Media & Posts read and write, and Profile read. Leave AI Services write off — it can spend Buzz. Never sent back to this page."
+    },
+    {
+      "key": "site",
+      "label": "Open drafts on",
+      "type": "select",
+      "default": "civitai.com",
+      "help": "Where a finished draft opens. R+ images are only visible on civitai.red.",
+      "options": [
+        {
+          "value": "civitai.com",
+          "label": "civitai.com"
+        },
+        {
+          "value": "civitai.red",
+          "label": "civitai.red (R+)"
+        }
+      ]
+    }
+  ],
+  "compose": [
+    {
+      "key": "title",
+      "label": "Title",
+      "type": "text",
+      "placeholder": "what this post is called on Civitai"
+    },
+    {
+      "key": "detail",
+      "label": "Description",
+      "type": "textarea",
+      "help": "Optional. The title is used if you leave this empty."
+    },
+    {
+      "key": "tags",
+      "label": "Tags",
+      "type": "text",
+      "placeholder": "comma separated",
+      "help": "Optional. Civitai adds its own tags as well."
+    },
+    {
+      "key": "site",
+      "label": "Open on",
+      "type": "select",
+      "options": [
+        {
+          "value": "civitai.com",
+          "label": "civitai.com"
+        },
+        {
+          "value": "civitai.red",
+          "label": "civitai.red (R+)"
+        }
+      ],
+      "default": "civitai.com",
+      "help": "Starts at your setting. Change it here for this post only."
+    },
+    {
+      "key": "mark_published",
+      "label": "Mark these Posted",
+      "type": "checkbox",
+      "default": true,
+      "help": "Adds the Posted flag. Other labels on these files are kept."
+    }
+  ]
+}

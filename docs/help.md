@@ -3,6 +3,7 @@
 My goal is to make VV Curator intuitive, but there will always be gaps, and that's what this Help
 doc is for.
 
+<!-- group: Start here -->
 ## Getting started
 
 **A library is a folder, and the libraries button at the top of the main left rail is where they
@@ -48,6 +49,10 @@ that carry it, not a requirement — a file with no metadata still gets a card.
 | **Stills** | PNG, JPG, WebP, GIF |
 | **Video** | MP4, MOV, WebM |
 | **Audio** | MP3, WAV, FLAC, M4A, Opus |
+
+**A `.txt` beside a video or song is read, not shown.** The VV Run Name node writes one when a video
+or audio node saves under its name, because those files can't hold a readable prompt. The app takes
+the prompt and settings from it, never lists it as a file of its own, and never posts it.
 
 Anything else in the folder is left alone. A video's own settings are read from inside the file the
 same way an image's are; the exceptions are in [Known gaps](#known-gaps).
@@ -97,13 +102,14 @@ opening a file fixes what you are *looking at*. Searching, filtering and sorting
 library at once, so an image whose prompt was never indexed still will not be *found* by that
 prompt, and still will not appear under its model, until the library is rescanned.
 
+<!-- group: Using it -->
 ## Keyboard
 
 **In the grid**
 
 | Key | Does |
 |---|---|
-| `a`–`e` | Apply a curation label to the selection |
+| `a`–`e` | Set a status, or switch a flag on or off, for the selection |
 | `R` | Refresh changed libraries |
 | `X` | Reset all — every filter, the sort, and the loaded snapshot |
 | `Delete` / `Backspace` | Recycle the selection |
@@ -122,7 +128,7 @@ prompt, and still will not appear under its model, until the library is rescanne
 | `Shift`+`z` | Magnify only while held |
 | `Space` | Play or pause a video |
 | `1`–`9` | Mark the keeper in an image set. In focus view, show that member instead |
-| `a`–`e` | Apply a curation label |
+| `a`–`e` | Set a status, or switch a flag on or off |
 | `Delete` / `Backspace` | Recycle. In a set: recycle the others, or the whole set if no keeper is marked |
 | `Esc` | Close. From focus view it goes back to the normal view first |
 
@@ -151,7 +157,7 @@ line at the bottom of the window says so. Typed boxes save when you stop typing.
 | After marking a keeper | Next card |
 | Models folder (for Civitai export) | empty |
 | Tell me when a new version is available | On, after the first-run pop-up asks |
-| Record a debug trace | Off, and per browser rather than saved |
+| Record a debug trace | Off, and switches itself off when you close the app |
 
 **Recycling**
 
@@ -180,8 +186,9 @@ on Dark belongs to Dark, so switching to Light and back finds your work where yo
 library's `⋯` menu, and reads your positive prompts, folder names and file names to suggest
 tags from what it finds.
 
-**Extensions** lists what is in the `extensions/` folder. A row reads **Ready**, **Off**, **Not set
-up**, **Setting up…** or **Not loading** (with the reason).
+**Extensions** lists what is in the `extensions/` folder. Every one arrives switched off, and its
+description says what it sends, if anything. A row reads **Ready**, **Off**, **Not set up**,
+**Setting up…** or **Not loading** (with the reason).
 **Set up…** opens the extension's own console window and downloads what it needs; the button stays
 as **Re-run setup…** afterwards, because re-running is also how you repair an install.
 
@@ -196,6 +203,12 @@ whatever it finished, including a rescan of a library you already have.
 down, that library's cards leave the grid and its files leave the counts — the app says so once, and
 your tick is left alone. Reconnect and they return on their own. Its `⋯` menu keeps only Remove in
 the meantime.
+
+**Card details only show on Large and Extra-large cards.** The small print under a card, set in
+Settings → Cards, has no room on Small and Medium, so it is left off there rather than cut short.
+
+**The Groups tab shows one group at a time.** Picking another replaces it, which the round button
+on each row says. A group is a list, not a folder: deleting one leaves every file where it was.
 
 **A card is not always a file.** Files from one generation — a still and its video, a set's three
 stages, a song and its cover — collapse into one card, and a mark applies to the whole card. So
@@ -220,32 +233,8 @@ what you kept, so a stray arrow does not carry you off it. `Shift`+`←` `→` m
 as does leaving focus view — and so does undoing the keep, which puts the set back and hands the
 arrows with it. With "Next card" you have already been moved on, and nothing is held.
 
-**Recycling a card takes the whole run, including a file queued for recycle already.** A video's
-`.txt` goes too, but only once every file of that run has gone: one text file can describe a whole
-generation, so it stays while any of them remain.
-
 **File type asks what a card *is*, not what it contains.** While runs are collapsing, a run holding
 a video is a Video and appears under nothing else, even though a still is what you can see.
-
-**Recycling hands files to Windows; it doesn't delete them itself.** On a local drive it does exactly
-what deleting in File Explorer does — the file goes to the Windows Recycle Bin and stays there until
-you empty it. Two things follow from that, and neither is the viewer's doing: emptying the bin is
-permanent, and Windows silently discards the oldest things in the bin once a drive's bin quota is
-full. So "recycled" means "as safe as anything else in your Recycle Bin", not "kept forever".
-
-**Recycling on a network drive doesn't use the Recycle Bin,** because Windows has none there. Those
-files go to a `_ToRecycle` folder beside the library, and nothing ever empties it — that is a
-file-manager job. You can open it from the library's `⋯` menu, and a reminder appears once it passes
-either limit above. The upside is that nothing expires the way the bin does; the cost is that it
-grows until you clear it.
-
-**Buttons say "Recycle" rather than naming where files land,** because that depends on the library:
-the bin on a local drive, a `_ToRecycle` folder on a network one. A selection can span both at once.
-
-**Recycling thousands of files at a time is done in batches** — the duplicate cull works through the
-largest sets a few hundred at a time rather than all at once. A single huge delete can exceed the
-drive's bin quota, at which point Windows starts purging the oldest bin contents and "recoverable"
-stops being true.
 
 **A refresh only looks in folders whose timestamp moved,** plus any it has never seen. If files
 arrive without changing a folder's timestamp, use the library's own `↻`. A file it cannot read is
@@ -258,7 +247,7 @@ rescan, including *Rescan all libraries…*.
 format Civitai parses, with your checkpoint and LoRAs linked if a models folder is set.
 Uploading the raw file instead is why settings sometimes import without a prompt.
 
-**Open in ComfyUI needs a piece that lives inside ComfyUI.** That button, under an image, opens its
+**Edit in ComfyUI needs a piece that lives inside ComfyUI.** That button, under an image, opens its
 workflow straight onto ComfyUI's canvas — the one-click version of dragging the file there. It
 appears only for a file that carries a workflow, and it is dimmed until ComfyUI answers on this
 machine (port 8188). Two things dim it: ComfyUI is not running, or the **VV Bridge** is missing.
@@ -286,11 +275,49 @@ would match everything.
 fifteen seconds to go — a refresh looks the same from the outside for a moment, so it waits to see
 whether you come back. A scan keeps it alive until it has finished.
 
+## Recycling
+
+**Recycling hands files to Windows; it doesn't delete them itself.** On a local drive it does exactly
+what deleting in File Explorer does — the file goes to the Windows Recycle Bin and stays there until
+you empty it. Two things follow from that, and neither is the viewer's doing: emptying the bin is
+permanent, and Windows silently discards the oldest things in the bin once a drive's bin quota is
+full. So "recycled" means "as safe as anything else in your Recycle Bin", not "kept forever".
+
+**Recycling on a network drive doesn't use the Recycle Bin,** because Windows has none there. Those
+files go to a `_ToRecycle` folder beside the library, and nothing ever empties it — that is a
+file-manager job. You can open it from the library's `⋯` menu, and a reminder appears once it passes
+either limit under Settings → Recycling. The upside is that nothing expires the way the bin does;
+the cost is that it grows until you clear it.
+
+**For 5 seconds after, `Ctrl+Z` cancels it.** After that, restore it from the Recycle Bin, or move
+it back out of `_ToRecycle`.
+
+**Buttons say "Recycle" rather than naming where files land,** because that depends on the library:
+the bin on a local drive, a `_ToRecycle` folder on a network one. A selection can span both at once.
+
+**Recycling a card takes the whole run, including a file queued for recycle already.** Its `.txt`,
+if it has one, goes too, but only once every file of that run has gone: one text file can describe
+a whole generation, so it stays while any of them remain.
+
+**Recycling thousands of files at a time is done in batches** — the duplicate cull works through the
+largest sets a few hundred at a time rather than all at once. A single huge delete can exceed the
+drive's bin quota, at which point Windows starts purging the oldest bin contents and "recoverable"
+stops being true.
+
+Whether it asks first, and when the `_ToRecycle` reminder appears, are under Settings → Recycling.
+
 ## Posting to Civitai
+
+**To post straight from the app**, switch on the *Post to Civitai* extension. Its own help is under
+Extensions, at the end of this window. What follows is about the files themselves, however they reach Civitai.
 
 **Most images need no export.** If the file was saved by the VV saver node in ComfyUI, it already
 carries everything Civitai reads — upload the file itself and the prompt, model, settings and LoRAs
 come with it.
+
+**Unless the model arrives as a name that doesn't link.** Older files can carry the text block
+without the fingerprints that do the linking. Export that image and upload the copy instead: the
+export works the fingerprints out from your Models folder as it goes.
 
 **Civitai does not read the ComfyUI workflow.** It reads a short block of plain text that the VV
 saver writes alongside it. Where that block is missing or incomplete, Civitai falls back to reading
@@ -307,7 +334,7 @@ The ⬇ button in the detail bar, on PNG images only. It reads the workflow, wri
 block from it, and removes ComfyUI's own data so nothing sends Civitai down the wrong path. The copy
 goes to your browser's downloads as `<filename>.civitai.png`, and that is the file you upload.
 
-Use it for images the VV saver didn't make. **The exported copy will not open in ComfyUI** — the
+Use it for images the VV saver didn't make, and for older ones whose model or LoRAs land on Civitai unlinked. **The exported copy will not open in ComfyUI** — the
 workflow is what was removed.
 
 ### Getting your models linked, not just named
@@ -326,6 +353,7 @@ remembered afterwards.
 puts a labelled block on the clipboard, one value per line, to paste into the post's own fields.
 Generation settings are left out for video, where they describe the still rather than the clip.
 
+<!-- group: Details -->
 ## Where your things live
 
 | Path | Holds |
@@ -338,7 +366,8 @@ Generation settings are left out for video, where they describe the still rather
 | `extensions/<name>/` | One extension, including anything it downloaded |
 | `_ToRecycle/` | Beside a network library: what was recycled from it |
 
-The app serves itself on **port 8770**. Nothing leaves your machine.
+The app serves itself on **port 8770**. Nothing leaves your machine unless an extension you switched
+on sends it.
 
 ## Known gaps
 
@@ -367,7 +396,16 @@ Ordinary words, used here for particular things.
 | **Set** | A run's stages collapsed into one card: Raw, Detail, Refine, Upscale, Final. It only groups files the companion ComfyUI nodes stamped, or ones with `MAIN` / `DET` / `REFINE` in the filename — so you may have the switches and never see a set |
 | **Pair** | A still and a video sharing a filename, shown as one card with a ▶ |
 | **Keeper** | The one member of a set or pair you mark to keep. Recycling then takes the others |
-| **Label** | One of five fixed marks for what you intend to do with a file — To publish, Published, To refine, To explore, For video — on keys `a`–`e`. A file carries one at a time; picking another replaces it |
-| **Tag** | A word you type and attach to files yourself, for anything the labels don't cover. **None exist until you make the first one** — open a file and use *Add tags*, or tag a whole selection at once. They then become filters in the rail |
+| **Label** | A fixed mark, in two kinds. A **Status** is what you'll do next — To post, To refine, To explore — and a file has one; picking another replaces it. A **Flag** is something true about the file — Favorite, For video, Posted — and a file can have any number. Keys `a`–`e`; Favorite is the star |
+| **Tag** | A word attached to files, for anything the labels don't cover. You add them yourself, or **Scan for tags** (in a library's `⋯` menu) reads your prompts, folder and file names and suggests some to pick from. Either way, they become filters in the Tags tab |
 | **Snapshot** | A filter state — search, models, folders, sort — saved under a name so you can come back to it |
-| **Extension** | An optional add-on living in `extensions/`. None come with the app |
+| **Group** | A list of files you pick by hand, whatever folder they are in. A file can be in any number, and deleting a group never touches its files |
+| **Extension** | An optional add-on living in `extensions/`. One comes with the app, *Post to Civitai*, switched off |
+
+<!-- group: Extensions -->
+## How extensions work
+
+Optional add-ons, each in its own folder under `extensions/`. **Every one arrives switched off**:
+turn one on under Settings → Extensions. With none switched on, nothing leaves your machine, and
+each one says what it sends, if anything. An installed extension that brings its own help has it
+below.

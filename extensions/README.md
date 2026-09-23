@@ -68,6 +68,17 @@ a key the user cannot see. It reaches your worker in full.
 Values are stored per extension id in the app's `config.json`. **The folder name is the id**, so
 renaming your folder gives you a new extension with nothing configured.
 
+## Help, and what you send
+
+**Put a `HELP.md` in your folder and it appears in the app's Help window**, at the end, under your
+extension's name. The heading is the app's: start your own at `###`. It shows while your extension
+is installed, switched off included. Write it as a manual: Help shows no live state.
+
+**Say what you send, and when.** Every extension arrives switched off, and the app promises that
+with none switched on nothing leaves the machine. If yours sends anything anywhere, the first thing
+in `HELP.md`, and a sentence in your `description`, should say what goes, where, and what triggers
+it.
+
 ## Testing yourself
 
 Declare `"test": true` and your panel gets a **Test connection** button. The app spawns you exactly

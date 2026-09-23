@@ -90,5 +90,24 @@ cfg = server.load_config()
 check('load_config returns the real config, not defaults',
       len(cfg['roots']) == 1 and len(cfg['snapshots']) == 1, cfg.get('roots'))
 
+# A FILE SOMETHING ELSE HAS OPEN. On Windows a plain open() does not share delete, so while it is
+# held os.replace onto that name is refused with WinError 5 -- what Defender or the indexer does to
+# the file the previous save just wrote. The author hit it 2026-09-23 switching an extension on and off.
+# Held for 300ms from another thread, as a scanner would; the save has to wait it out, not fail.
+import threading  # noqa: E402
+import time  # noqa: E402
+if os.name == 'nt':
+    held = open(os.environ['CV_CONFIG'], 'r', encoding='utf-8')
+    threading.Thread(target=lambda: (time.sleep(0.3), held.close()), daemon=True).start()
+    server.CONFIG['seen_help_hint'] = True
+    try:
+        server.save_config()
+        ok, err = True, ''
+    except OSError as e:
+        ok, err = False, e
+    check('a save waits out a file held open elsewhere, instead of failing', ok, err)
+    check('...and what it saved is there', json.loads(on_disk()).get('seen_help_hint') is True)
+    check('...and leaves no scratch file', scratch_files() == [], scratch_files())
+
 print('\nall passed' if not failures else '\n%d failed' % len(failures))
 sys.exit(1 if failures else 0)

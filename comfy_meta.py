@@ -276,6 +276,24 @@ def _encode_text(g, node):
     return ''
 
 
+# LINKS THIS WALK MUST NEVER DESCEND. They carry a model, a CLIP or a VAE -- never conditioning --
+# and following one leaves the prompt chain for the model chain, where the LoRA loaders live.
+#
+# That is not hypothetical. A node is treated as a text node if it merely HAS a `text` input, which
+# `Lora Loader (LoraManager)` does: its widget holds "Go to http://127.0.0.1:8188/loras to apply
+# LoRAs" plus the run's <lora:...> tags. With a real negative prompt nothing went wrong, because the
+# encode returned its own text and the walk stopped. With an EMPTY negative -- ordinary on Flux and
+# Krea -- the encode returned nothing, the walk carried on through its `clip` link into the LoRA
+# chain, and that placeholder became the file's negative prompt. It reached the Details pane and the
+# Civitai export both, which is how a 127.0.0.1 address could end up under a published image.
+#
+# A denylist rather than an allowlist on purpose: relay nodes carry conditioning under names nobody
+# can enumerate (see _MODEL_CHAIN_KEYS below, written after `base_ctx` broke the model walk), so the
+# walk stays permissive about what it follows and specific about what it refuses.
+_NOT_CONDITIONING = frozenset(('clip', 'clip_vision', 'model', 'vae', 'latent', 'samples',
+                               'image', 'images', 'mask', 'pixels'))
+
+
 def _follow_to_text(g, ref, seen=None, depth=0):
     """From a conditioning link, walk to the CLIPTextEncode and return its text."""
     if depth > 64 or not _is_link(ref):
@@ -301,6 +319,8 @@ def _follow_to_text(g, ref, seen=None, depth=0):
     priority = ['conditioning', 'positive', 'cond', 'input', 'a', 'b']
     keys = sorted(inp.keys(), key=lambda k: (priority.index(k) if k in priority else 99, k))
     for k in keys:
+        if k in _NOT_CONDITIONING:
+            continue
         v = inp[k]
         if _is_link(v):
             r = _follow_to_text(g, v, seen, depth + 1)
@@ -2775,6 +2795,12 @@ def _format_parameters(meta, params, width, height, hash_resolver=None, raw_ckpt
     resources it can resolve get `Model hash` / `Lora hashes` (AutoV2) for Civitai auto-linking."""
     loras = raw_loras if raw_loras is not None else (meta.get('loras') or [])
     pos = (meta.get('positive') or '').strip()
+    # THE `<lora:...>` TAGS ARE LOAD-BEARING -- settled, do not remove them for tidiness. They read
+    # as clutter in the prompt, but the tag is the ONLY thing that carries the LoRA's WEIGHT to
+    # Civitai. Measured over three variants: tag + `Lora hashes` gives name, hash and weight;
+    # `Lora hashes` alone loses the weight; a `Civitai resources` field makes the LoRA vanish (never
+    # parsed out of A1111 text, and its schema wants a modelVersionId only their API returns).
+    # The hash does the LINKING; the tag does the STRENGTH. The author took the trade over clean prompts.
     lora_tags = ' '.join(
         f"<lora:{l['name']}:{_fmt_num(l.get('strength') if l.get('strength') is not None else 1)}>"
         for l in loras if l.get('name'))
@@ -2787,6 +2813,10 @@ def _format_parameters(meta, params, width, height, hash_resolver=None, raw_ckpt
     if neg:
         lines.append('Negative prompt: ' + neg)
     parts = []
+    # CIVITAI'S PARSER GATES ON THE LITERAL STRING `Steps: `. Without it the file falls through to
+    # their ComfyUI reader, which returns an empty bag for a real graph -- so one missing field
+    # costs the whole block, not just that field. Measured against @civitai/generation-metadata
+    # (npm) over three variants of one file.
     if params.get('steps') is not None:
         parts.append(f"Steps: {int(params['steps'])}")
     if params.get('sampler_name'):

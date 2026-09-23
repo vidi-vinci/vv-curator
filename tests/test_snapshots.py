@@ -126,6 +126,10 @@ def run(here, tmp):
                 'group': True, 'sets': False, 'tags': ['label:publish', 'portrait'],
                 'favOnly': True, 'hasNote': True,
                 'rmin': 0.7722, 'rmax': '', 'dfrom': '2026-01-01', 'dto': '',
+                # The Group filter, as an id. A snapshot CAN carry one -- that is what makes
+                # "the videos in Ocean series" a saveable question -- and a non-zero value here is
+                # what proves the key survives rather than merely being tolerated.
+                'coll': 7,
                 'sort': 'random', 'order': 'asc'}
         # `unreviewed` and `roots` are sent but are NOT in `full`, and the equality check below is
         # what proves both were dropped. Both left the whitelist, which is the mechanism that

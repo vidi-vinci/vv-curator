@@ -94,7 +94,8 @@ present and doing nothing else. Never accent, never a second change alongside th
 > The tell that it was wrong was direction, not consistency: a facet row lives in a dropdown, whose
 > ground is `--bg3`, and its hover was `--bg2` — **darker in dark mode, lighter in light mode**.
 > Measured, the ink holds its step within 0.08 (dark) and 0.01 (light) across all four surfaces.
-> **15% dark / 11% light**, the author's pick by eye from three strengths.
+> **13% dark / 11% light**, the author's pick by eye — 15% dark left the filmstrip's accent
+> ring at 3.04:1, so dark came down to 13%.
 >
 > **Never name a surface token as a hover background.** `tests/test_hover_policy_css.py` fails on
 > one.
@@ -457,10 +458,12 @@ written on different days.
 | **Library** | One folder you added, with its own root id | root, source |
 | **Snapshot** | A saved capture of the whole sidebar state | view, preset, saved search |
 | **Set** | Files from one generation collapsed into a card | group, stack, bundle |
-| **Label** | The exclusive one-key curation mark (`a`–`e`) | flag, status, rating |
+| **Label** | Umbrella for the fixed-list marks: a Status and any Flags | — |
+| **Status** | exactly one per file: To post, To refine, To explore | label, stage |
+| **Flag** | any number per file, from a fixed list: Favorite, For video, Posted | label, tag |
 | **Tag** | A free-text keyword, many per image | keyword, category |
 | **Detail** | One reported fact about a file — Dimensions, Age, Model, Quality | fact, field, property |
-| **Group** | *(BR-12, unbuilt)* a hand-picked, ordered list | collection, folder, bin |
+| **Group** | *(BR-12, unbuilt)* a hand-picked list of files, any files, many per file | collection, folder, bin, set |
 | **Folder** | The real folder on disk | directory, path |
 | **Quality** | The pyiqa score | rating, grade |
 | **Hidden** | The "not this one, for now" mark | archived, excluded, deleted |
@@ -471,7 +474,31 @@ written on different days.
 | **File size** | Bytes on disk | size, weight |
 | **Duration** | How long a video or song runs | length, runtime |
 | **Age** | How long ago a file was made, in words | date (that is the absolute one) |
+| **Post** | A draft on Civitai holding one or more files | upload, publication, gallery |
 | **Generation settings** | Seed/steps/CFG/sampler/scheduler read from the file | parameters, gen params |
+
+### Status and Flags — agreed 2026-09-21, built 2026-09-23
+
+Labels conflate two things. **Status answers "what do I do with this next"** and a file has exactly
+one, because you only do one next thing. **A Flag answers "what is true about this"** and a file
+has any number.
+
+| | How many | Members |
+|---|---|---|
+| **Status** | exactly one (or none) | To post, To refine, To explore |
+| **Flags** | any number | Favorite, For video, Posted |
+
+The case that settles it is his, 2026-09-21: *"This would be great for video, but I need to refine
+it."* One thought, unrepresentable today — the exclusive set makes you discard half of it.
+
+**Three consequences.** *Published* stops being a Status, which is what makes it destructive today:
+posting deletes whatever the file was marked before. *Favorite* moves from Tags to Labels, where
+the things that behave like it live; its `source='fav'` storage does not have to move with it.
+*To refine* and *To explore* both stay — rework and re-generation are different acts (his call after
+they were nearly merged).
+
+The words *flag* and *status* used to sit in Label's never-call-it column. They were the two things
+Label was conflating.
 
 **Two entries are warnings.** *Group* is what `group_id` and `recompute_groups` call a Set
 internally — the UI meaning wins. *Detail* is likewise `CARD_FACTS` in the code. A mechanical rename

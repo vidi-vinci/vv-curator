@@ -69,7 +69,7 @@
      right for a gold someone may replace with a navy. The fallback is correct for the shipped
      gold, and only applies before applyTheme has run. */
   --reward-fg: var(--reward-bg-ink, #10141a);
-  --tag-fav: #e0b83a;        /* Favorites row label */
+  --tag-fav: #e0b83a;        /* Favorite row's star, Labels tab */
   --label-publish: #45b06a;    /* curation label: To publish (green) */
   --label-published: #4a86c5;  /* curation label: Published (blue) */
   --label-refine: #e0873a;     /* curation label: To refine (amber) */
@@ -124,6 +124,11 @@
   --icon-return: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 4v7a4 4 0 0 1-4 4H4'/%3E%3Cpath d='m9 10-5 5 5 5'/%3E%3C/svg%3E");
   --icon-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
   --icon-plus: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14'/%3E%3Cpath d='M12 5v14'/%3E%3C/svg%3E");
+  /* A LIST, which is what a Group is -- the settled distinction from a Snapshot, which is a
+     QUERY. Deliberately NOT --icon-layers: that is the Sets badge, and the Snapshots row
+     dropped its own icon in 2026-09-08 for exactly this reason ("it looks too much like
+     sets anyway"). Vendored at app/vendor/lucide/list.svg like the rest. */
+  --icon-list: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5h.01'/%3E%3Cpath d='M3 12h.01'/%3E%3Cpath d='M3 19h.01'/%3E%3Cpath d='M8 5h13'/%3E%3Cpath d='M8 12h13'/%3E%3Cpath d='M8 19h13'/%3E%3C/svg%3E");
   --icon-refresh: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8'/%3E%3Cpath d='M21 3v5h-5'/%3E%3Cpath d='M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16'/%3E%3Cpath d='M8 16H3v5'/%3E%3C/svg%3E");
   --icon-star: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z'/%3E%3C/svg%3E");
   --icon-star-on: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z'/%3E%3C/svg%3E");
@@ -676,6 +681,7 @@ button.secondary { background: var(--bg3); border-color: var(--border-control); 
 .tabpane { display: contents; }
 #sidebar.tab-filters .tabpane:not([data-pane="filters"]),
 #sidebar.tab-labels  .tabpane:not([data-pane="labels"]),
+#sidebar.tab-groups  .tabpane:not([data-pane="groups"]),
 #sidebar.tab-tags    .tabpane:not([data-pane="tags"]) { display: none; }
 /* (.sidebar-sep is gone — see the comment above .filter-tabs in index.html. It drew a boundary
    above the tabs where there is none: SORT is captured by a snapshot exactly as the filter panes
@@ -1392,6 +1398,7 @@ select:focus { transition: none; }
 #minerRemine, #libRescanAll { --ico: var(--icon-refresh); }
 button.done { --ico: var(--icon-check); }
 #selRename { --ico: var(--icon-pencil); }
+#selGroup { --ico: var(--icon-list); }
 
 /* ---- bare marks: a badge or button whose whole content is one icon ----------------------------
    Same mask idea as .has-ico, but with no label to sit beside — so the size is the component's, not
@@ -1525,14 +1532,6 @@ button.done { --ico: var(--icon-check); }
    nothing is ticked -- the same "no stray gap" rule .chips-row:empty exists for. */
 .tagchips.is-empty { display: none; }
 
-.taglist .tagrow.fav .tname { color: var(--tag-fav); }
-.taglist .tagrow.fav .tname::before {
-  content: ''; display: inline-block; vertical-align: -1px;
-  width: var(--glyph-xs); height: var(--glyph-xs); margin-right: var(--space-1);
-  background: currentColor;
-  -webkit-mask: var(--icon-star-on) center / contain no-repeat;
-          mask: var(--icon-star-on) center / contain no-repeat;
-}
 .taglist .tcount { color: var(--muted); font-style: normal; font-size: var(--text-xs); flex: 0 0 auto; }
 
 /* NUMBERS THAT NO LONGER DESCRIBE THE CURRENT FILTER, while the new ones are being fetched. Only
@@ -2956,12 +2955,87 @@ button.lib-stat:hover { background-color: var(--hover-lift); color: var(--fg); }
 .dialog-choices label { display: flex; align-items: flex-start; gap:var(--space-2); cursor: pointer; }
 .dialog-choices input { margin-top:2px; flex: 0 0 auto; }   /* aligns the box to the first line, not the block */
 .dialog-choices .dlg-choice-hint { display: block; color: var(--muted); font-size: var(--text-sm); }
+
+/* COMPOSE MODE: a dialog that builds something rather than confirming it. The fields are the
+   extension's own schema drawn by extFieldRow, so they arrive as .set-row and inherit Settings'
+   spacing -- there is nothing to style here but the gap around the block. */
+/* CAPPED, because this is the only dialog whose height is written by a manifest rather than by the
+   app. Four fields with help text under them came to 362px of a 643px box, which put Cancel and
+   Create draft off the bottom of a 560px-tall window -- a dialog you cannot dismiss. The cap leaves
+   room for the title, message, strip and buttons (about 280px) and only bites when the window is
+   short: at 720 the whole form fits and nothing scrolls. */
+.dialog-fields { margin: 0 0 var(--space-4); max-height: calc(100vh - 320px); min-height: 120px;
+  overflow-y: auto; }
+.dialog-fields.hidden { display: none; }
+/* The files, in the order they will be used. SCROLLS SIDEWAYS rather than wrapping: a wrapped
+   strip of fifty re-flows the dialog taller than the window, and the only thing this has to show
+   is which one is first. */
+.dialog-strip { display: flex; gap:var(--space-1); overflow-x: auto; margin:0 0 var(--space-4);
+  padding-bottom: var(--space-1); }
+.dialog-strip.hidden { display: none; }
+.dlg-strip-cell { position: relative; flex: 0 0 auto; width: 56px; height: 44px;
+  border-radius: var(--radius-sm); overflow: hidden; background: var(--bg3); }
+.dlg-strip-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* The number is the point of the strip, so it carries its own scrim rather than trusting the
+   picture underneath -- same reasoning as the card's filename band. */
+.dlg-strip-n { position: absolute; left: 0; bottom: 0; padding:0 var(--space-1);
+  font-size: var(--text-xs); color: var(--card-ink); background: var(--card-scrim-strong);
+  border-top-right-radius: var(--radius-sm); }
+.dlg-strip-cell:first-child { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* A FILE THAT CAME WITH A CARD rather than being chosen: a video's still, a set's other members,
+   an LTX run's silent twin. It is going out either way, so it is not dimmed -- dimming would say
+   "not included", which is the opposite of the truth. DASHED against the cover's SOLID accent, so
+   the two marks in this strip read as different kinds of thing without a second colour.
+   The first cell is never one of these: expansion appends a card's members AFTER the id that
+   pulled them in, so position 1 is always a file the user named. */
+.dlg-strip-cell.came-with { outline: 2px dashed var(--border-control); outline-offset: -2px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap:var(--space-2); }
 .dialog-actions button { min-width: 84px; padding:var(--space-2) var(--space-4); }
 /* Same sweep, same fault: a plain alert hides its Cancel, and with no rule to hide BY the class did
    nothing — so every alert offered a Cancel button beside its OK. */
 .dialog-actions button.hidden { display: none; }
 .dialog-actions .primary.danger { background: var(--danger); border-color: var(--danger); color: var(--on-accent); }
+
+/* ---- the publish log, on a post extension's Settings tab ---------------------------------------
+   A SCROLLING LIST IN A PANEL IS ALREADY SOLVED (.taglist, .answers-list), so this adds only what
+   its rows need: a fixed leading column for the date so the dates line up, a flexible middle for
+   the title, and the reason-or-outcome pushed to the end. Same reasoning as .answers-list -- a new
+   list does not bring a new surface with it. */
+.postlog { display: block; }
+.postlog-body {
+  max-height: 260px; overflow-y: auto; overflow-x: hidden;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg3);
+  padding: var(--space-1); margin-top: var(--space-1);
+}
+.postlog-row {
+  display: flex; align-items: baseline; gap: var(--space-2);
+  padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+.postlog-row:hover { background: var(--hover-lift); }
+.postlog-row .pl-when { flex: 0 0 auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The title gets the lion's share. It is the only column that says WHICH post this was, and it was
+   ellipsising at about twelve characters while "Created as draft" -- the same four words on every
+   successful row -- sat beside it at full width. */
+.postlog-row .pl-what { flex: 3 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                        white-space: nowrap; }
+.postlog-row .pl-files { flex: 0 0 auto; color: var(--muted); }
+/* The outcome, and the widest thing here on a failure -- it carries the worker's own sentence.
+   Allowed to wrap where everything else truncates: an error cut off mid-clause is the one line on
+   this page you cannot act on. */
+.postlog-row .pl-note { flex: 1 1 30%; min-width: 0; color: var(--muted); }
+.postlog-row.bad .pl-note { color: var(--danger); }
+.postlog-row .pl-open { flex: 0 0 auto; }
+.postlog-row .pl-retry { flex: 0 0 auto; }
+/* Scoped like the tag list's, so the global `#sidebar input { width:100% }` and the settings
+   panel's own field widths never reach it. */
+.postlog-row .pl-pick { width: auto; margin: 0; flex: 0 0 auto; accent-color: var(--accent);
+                        cursor: pointer; }
+/* Hidden until something is ticked, not dimmed: one destructive verb under a list you are usually
+   only reading. Its own .hidden rule, because there is no global one. */
+.postlog-bar { display: flex; justify-content: flex-end; gap: var(--space-2);
+               margin-top: var(--space-2); }
+.postlog-bar.hidden { display: none; }
 
 /* selection bar */
 .selbar {
@@ -3016,6 +3090,21 @@ button.lib-stat:hover { background-color: var(--hover-lift); color: var(--fg); }
 /* --bg2, not --bg3: the menu's surface IS --bg3, so the bar's hover would be invisible on it.
    The surface decides the direction — see the same note on the detail view's overflow. */
 .selbar-actions #selMoreMenu button:hover:not([aria-disabled="true"]) { background: var(--hover-lift); }
+/* The Group picker. Anchored exactly like .sel-more above, and for the same reason: the menu is
+   positioned against this wrapper, and the wrapper must not be the flex item that wraps oddly. */
+.sel-group { position: relative; display: inline-flex; flex: 0 0 auto; }
+/* LEFT-ALIGNED, unlike .popmenu's default right:0. The ⋯ sits at the bar's right edge so its menu
+   hangs off that edge; this button is in the middle of the row, and a menu pinned to its RIGHT
+   edge would open leftwards across the buttons it came from. */
+#selGroupMenu { right: auto; left: 0; min-width: 240px; }
+/* A CHECKBOX, where the rail's group rows take a radio. That is the whole vocabulary: the rail
+   FILTERS, which is one group at a time; this is MEMBERSHIP, which is many. Scoped under #sidebar's
+   sibling rather than inside it, so the global `#sidebar input { width:100% }` never reaches it. */
+#selGroupMenu .grow-pick input[type="checkbox"] {
+  width: auto; margin: 0; flex: 0 0 auto; accent-color: var(--accent);
+  pointer-events: none;   /* the ROW is the control; the box is its state, not a second target */
+}
+
 /* There is no global .hidden utility — every component scopes its own, or the class silently does
    nothing and the element is always visible. */
 .selbar-actions button.hidden { display: none; }
@@ -3249,6 +3338,40 @@ button.danger:hover:not(:disabled):not([aria-disabled="true"]) { background: var
   flex: 0 0 auto; font-size: var(--text-xs); color: var(--muted);
   border: 1px solid var(--border); border-radius: var(--radius-xs); padding:0 var(--space-1); line-height: 1.5;
 }
+/* GROUP ROWS. The Labels component, plus the one thing Labels never needed: a mark that says
+   ONLY ONE OF THESE AT A TIME. The app already spells "pick several" as a checkbox (the Tags pane,
+   the root list, the Notes / Awards rows) and had no spelling at all for the opposite -- so a bare
+   row currently means both "exactly one" (a Status) and "several" (a Flag) in the same list. This
+   is the missing half of that vocabulary, not a new one.
+   Sized and placed off .lsw so the group rows and the label rows line their text up: same 12px
+   box in the same slot, a circle instead of a square. */
+.label-row .lradio {
+  width: 12px; height: 12px; flex: 0 0 auto; border-radius: 50%;
+  border: 1px solid var(--border-control); box-sizing: border-box;
+}
+/* ON: a ring and a centred dot with a gap between, the ordinary radio. --accent, not --active: it
+   is the same ink as the ticked checkbox in the Flags rows below it (accent-color), and the two are
+   one vocabulary. The dot is a background rather than a child element, so it cannot drift. */
+.label-row.active .lradio {
+  border: 2px solid var(--accent);
+  background: radial-gradient(circle, var(--accent) 0 2.5px, transparent 3px);
+}
+/* Favorite's swatch is its star, the mark it wears on the card, in the swatch's own 12px slot. */
+.label-row .lsw-fav {
+  background: var(--tag-fav); border-radius: 0;
+  -webkit-mask: var(--icon-star-on) center / contain no-repeat;
+          mask: var(--icon-star-on) center / contain no-repeat;
+}
+/* A flag row's checkbox is its state, not a second target -- the row is the control (#selGroupMenu
+   does the same). Without this a click on the box toggles it natively AND re-renders from state. */
+#labelList .filter-check input[type=checkbox] { pointer-events: none; }
+.label-row .grow-more {
+  flex: 0 0 auto; opacity: 0; border: none; background: transparent; color: var(--muted);
+  padding: 0 var(--space-1); line-height: 1; cursor: pointer; border-radius: var(--radius-xs);
+}
+.label-row:hover .grow-more, .label-row .grow-more:focus-visible { opacity: .7; }
+.label-row .grow-more:hover { opacity: 1; color: var(--fg); background: var(--hover-lift); }
+
 /* detail Labels row: four color buttons, active one outlined */
 .label-btns { display: flex; gap:var(--space-2); flex-wrap: wrap; margin-top:var(--space-1); }
 .label-btn {
@@ -4431,6 +4554,13 @@ button.tertiary, button.ghost { background: transparent; }   /* .ghost = legacy 
    at zero there is nothing to report and an "0 hidden" would be noise. */
 .set-count { color: var(--fg); }
 .set-count.hidden { display: none; }
+/* Settings -> Cards, below the rows: what the CURRENT grid size means for them. Same shape as
+   `.settings-panel > .group-title + .set-help` above -- a help line's margin belongs to its
+   CONTEXT, and five sites already adjust it this way. The flip is top-for-bottom: measured, the
+   inherited bottom margin left the note flush against the last row with 8px spent under it where
+   the panel already ends. Its own `.hidden`, per the no-global-utility rule. */
+.fact-rows + .set-help { margin: var(--space-2) 0 0; }
+.fact-rows + .set-help.hidden { display: none; }
 .set-help code { background: var(--bg3); padding:1px var(--space-1); border-radius: var(--radius-sm);
   font: 11px ui-monospace, monospace; }
 .set-prompt { min-height: 150px; resize: vertical; font: 12px/1.5 ui-monospace, monospace; }

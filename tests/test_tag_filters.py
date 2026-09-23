@@ -213,7 +213,7 @@ check('the fetch asks with the same string it keys on', "getJSON('/api/tags?' + 
 check('  ...and caches the answer under it', 'tagCachePut(key, data)' in ft, True)
 at = src[src.index('function applyTags('):]
 at = at[:at.index('\n}')]
-check('  ...and what is on screen records which filter it describes', '_tagsKey = key' in at, True)
+check('  ...and what is on screen records which filter it describes', 'Object.assign(_part[part], { key,' in at, True)
 
 # THE CACHE'S ONE RULE, pinned because it is the difference between a stale count and a slow one: a
 # DIRECT loadTags() means a caller knows the tags themselves changed, so every cached answer goes,
@@ -221,7 +221,7 @@ check('  ...and what is on screen records which filter it describes', '_tagsKey 
 lt = src[src.index('async function loadTags'):]
 lt = lt[:lt.index('async function _fetchTags')]
 check('loadTags throws away every cached answer', 'tagCacheClear()' in lt, True)
-nd = src[src.index('function tagsNeeded('):]
+nd = src[src.index('function needPart('):]
 nd = nd[:nd.index('\n}')]
 check('  ...and the lazy path reads the cache instead of clearing it',
       'tagCacheGet(key)' in nd and 'tagCacheClear' not in nd, True)

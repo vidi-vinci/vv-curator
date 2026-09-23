@@ -80,7 +80,10 @@ check('THE VENV ALONE IS NOT READY when a model is still missing',
 make('heavy', mf, ['venv/model-cache/weights.pth'])
 e = server.get_extension('heavy')
 check('venv AND the required file -> installed', e['installed'] is True, e['installed'])
-check('...and it counts as active, since nothing has switched it off', e['active'] is True)
+check('...and it is OFF until switched on: every extension ships off', e['active'] is False)
+server.CONFIG['extensions'] = {'heavy': True, 'texty': True}
+e = server.get_extension('heavy')
+check('...and active once switched on', e['active'] is True)
 
 # --- a venv extension that requires nothing keeps the old, looser meaning -----------------------
 make('loose', {'name': 'Loose', 'produces': 'score', 'worker': 'w.py', 'venv': 'venv'},

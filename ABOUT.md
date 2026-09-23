@@ -10,11 +10,14 @@ whole library becomes searchable by prompt, model and LoRA. Then it helps you fi
 collapse a generation into one card, mark the keeper, recycle the rest, and export the good ones
 with Civitai metadata.
 
-Everything runs on your own machine. Nothing is uploaded, there is no account, and there is no
-telemetry. The app makes exactly one outbound request: at startup it asks GitHub whether a newer
-version has been released, so it can tell you. It sends nothing about you or your library, it never
-downloads or installs anything, you are asked before the first one, and it can be switched off in
-Settings.
+**The base app, with no extensions switched on, is local only. Nothing leaves your machine.** There
+is no account and no telemetry. Its one outbound request is at startup, asking GitHub whether a
+newer version has been released. It sends nothing about you or your library, never downloads or
+installs anything, asks before the first one, and can be switched off in Settings.
+
+**Extensions are optional, arrive switched off, and each says what it sends.** The one that ships,
+*Post to Civitai*, sends the files you choose and your Civitai API key to Civitai, and only when you
+press Post.
 
 ## Is this for you?
 
@@ -30,6 +33,7 @@ small enough that File Explorer is fine.
 |---|---|
 | **Do I need the custom nodes?** | No. They make grouping exact and Civitai metadata correct at generation time, but the viewer works without them — and *Export for Civitai* is still the file you upload either way |
 | **Will it touch my files?** | It reads them where they are, and never reorganises your folders. Recycling is the one thing that moves a file — to the Windows Recycle Bin, or to a `_ToRecycle` folder beside the library on a network drive, with a 5-second undo |
+| **Can it post to Civitai?** | Yes, with the *Post to Civitai* extension. Switch it on, add your Civitai API key, and a selection goes up as one draft. Nothing is public until you publish it on Civitai |
 | **How big a library?** | Built and used against 110k+ files across five libraries — two local, three on network shares |
 | **Windows only?** | Yes, end to end. There is no Mac or Linux version and none is planned |
 | **Is there an installer?** | No. You download the folder and run it from there |

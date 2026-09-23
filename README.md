@@ -10,10 +10,14 @@ a run into one card, mark the keeper, recycle the rest, and export the good ones
 Built and used against **110k+ files across five libraries** — two local, three on network
 shares.
 
-Everything runs on your own machine. Nothing is uploaded, there is no account and there is no
-telemetry. The app makes exactly one outbound request: at startup it asks GitHub whether a newer
-version has been released. It sends nothing about you or your library, never downloads or installs
-anything, asks before the first one, and can be switched off in Settings.
+**The base app, with no extensions switched on, is local only. Nothing leaves your machine.** There
+is no account and no telemetry. Its one outbound request is at startup, asking GitHub whether a
+newer version has been released. It sends nothing about you or your library, never downloads or
+installs anything, asks before the first one, and can be switched off in Settings.
+
+**Extensions are optional, arrive switched off, and each says what it sends.** The one that ships,
+*Post to Civitai*, sends the files you choose and your Civitai API key to Civitai, and only when you
+press Post.
 
 **New here?** [About VV Curator](ABOUT.md) — what it's for, and whether it's for you.
 

@@ -24,7 +24,7 @@ const state = { terms: [], xterms: [], model: '', folder: '', modelFolder: '', m
   // until the viewport is actually full, so a small page can't leave the first screen half-empty.
   offset: 0, limit: 30, total: 0, loading: false, done: false,
                 items: [], index: -1, current: null,
-                roots: [], activeRoot: null, metricRange: [0, 1], theme: {}, labels: [],
+                roots: [], activeRoot: null, metricRange: [0, 1], theme: {}, labels: [], status: [], flags: [],
                 // What /api/config said is installed. NULL until it answers, and that is
                 // load-bearing: extActive() reads null as "don't know yet" and leaves every
                 // control alone, so the Quality field doesn't flash in and out on every boot.
@@ -33,7 +33,14 @@ const state = { terms: [], xterms: [], model: '', folder: '', modelFolder: '', m
                 // (and if boot throws) an undefined would be falsy — i.e. confirms silently off.
                 // A guard's default has to survive its own initialisation not happening.
                 confirmRecycle: true,
-                snapshots: [], snapshotName: null };   // saved snapshots (server-side)
+                snapshots: [], snapshotName: null,   // saved snapshots (server-side)
+                // GROUPS. `groups` is the list with its counts; `coll` is the one currently
+                // filtering, as an id, 0 for none. A NUMBER AND NOT A LIST because a Group filter
+                // is one at a time -- the radio in the rail is what says so on screen, and making
+                // this an array is the change that would have to answer AND-or-OR first.
+                // Named `coll` to match the query param, which could not be `group`: that name
+                // has meant the Video-pairs toggle since long before Groups existed.
+                groups: [], coll: 0 };
 
 // ---- Metric (pyiqa reward) <-> friendly 1..10 scale (fixed linear rescale of metricRange) ----
 function metricTo10(raw) {                 // raw reward -> 1..10 for display
@@ -120,7 +127,8 @@ function _dlgClose(result) {
 // is one element reused by every dialog, so a custom word would otherwise stick to the next
 // confirm that didn't ask for one. Same reason the default lives here and not in index.html.
 function _dlgOpen({ msg, title = null, ok = 'OK', cancel = 'Cancel', danger = false,
-                   showCancel = true, input = null, choices = null }) {
+                   showCancel = true, input = null, choices = null,
+                   fields = null, values = null, strip = null }) {
   return new Promise(resolve => {
     _dlgResolve = resolve;
     // A heading only when one is asked for, and cleared when it is not — this dialog is reused for
@@ -152,6 +160,29 @@ function _dlgOpen({ msg, title = null, ok = 'OK', cancel = 'Cancel', danger = fa
     } else {
       $('#dlgOk').disabled = false;
     }
+    // STRIP: the files this dialog is about, in the order they will be used. Read-only. It exists
+    // because `selection` is a Set and therefore carries INSERTION order, which after a shift-range
+    // or a deselect-and-reselect is not click order -- and nothing else in the app shows it. When
+    // the first file becomes a post's cover, finding that out afterwards is too late.
+    const stripBox = $('#dlgStrip');
+    stripBox.classList.toggle('hidden', !strip || !strip.length);
+    // `came_with` marks a file the user did NOT choose -- it arrived because a card pulled it in
+    // (a video's still, a set's other members, an LTX run's silent twin). Those are the cells worth
+    // distinguishing: they are the ones that used to go out with nothing on screen to say so.
+    stripBox.innerHTML = (strip || []).map((it, i) =>
+      `<span class="dlg-strip-cell${it.came_with ? ' came-with' : ''}" ` +
+      `title="${esc(it.name || '')}${it.came_with ? ' — came with a card you selected' : ''}">` +
+      `<img draggable="false" src="${esc(it.thumb_url || '')}" alt="">` +
+      `<span class="dlg-strip-n">${i + 1}</span></span>`).join('');
+
+    // FIELDS: an extension's compose schema, drawn by the SAME function that draws its settings
+    // panel. That is the whole reason a post editor needs no markup from the extension -- a post
+    // editor is a form, and the app already knows how to draw one from a schema.
+    const fieldBox = $('#dlgFields');
+    fieldBox.classList.toggle('hidden', !fields || !fields.length);
+    fieldBox.innerHTML = (fields || [])
+      .map(f => extFieldRow({ id: 'dlg', values: values || {} }, f)).join('');
+
     const okBtn = $('#dlgOk');
     okBtn.textContent = ok; okBtn.classList.toggle('danger', !!danger);
     const cancelBtn = $('#dlgCancel');
@@ -161,7 +192,14 @@ function _dlgOpen({ msg, title = null, ok = 'OK', cancel = 'Cancel', danger = fa
     setTimeout(() => (input !== null ? inp : okBtn).focus(), 30);
   });
 }
-function _dlgSubmit() {   // OK: the ticked choices, or the input value for prompts, else true
+function _dlgSubmit() {   // OK: the composed values, the ticked choices, the input value, else true
+  const fieldBox = $('#dlgFields');
+  if (!fieldBox.classList.contains('hidden')) {
+    // Read back through the same accessor the settings panel uses, so a checkbox is a boolean here
+    // exactly as it is there and the server's coercion has one shape to expect.
+    _dlgClose(readExtFields(fieldBox));
+    return;
+  }
   const box = $('#dlgChoices');
   if (!box.classList.contains('hidden')) {
     _dlgClose([...box.querySelectorAll('input:checked')].map(i => i.dataset.choice));
@@ -247,14 +285,17 @@ function isTypingTarget(el) {
 const Trace = (() => {
   const KEY = 'vv_trace';
   const MAX = 600;                       // a few minutes of real use; oldest fall off the front
-  let on = localStorage.getItem(KEY) === '1';
+  // sessionStorage, so it survives a reload but not closing the app. The author, 2026-09-23: left on, it
+  // records for no one. The try is for a browser that refuses storage outright.
+  let on = false;
+  try { on = sessionStorage.getItem(KEY) === '1'; localStorage.removeItem(KEY); } catch (e) {}
   let rows = [], t0 = performance.now();
   const at = () => ((performance.now() - t0) / 1000).toFixed(2).padStart(7);
   return {
     get on() { return on; },
     set(v) {
       on = !!v;
-      localStorage.setItem(KEY, on ? '1' : '0');
+      try { sessionStorage.setItem(KEY, on ? '1' : '0'); } catch (e) {}
       if (on) { rows = []; t0 = performance.now(); this.add('trace', 'recording started'); }
     },
     add(kind, detail) {
@@ -549,7 +590,7 @@ function serializeFilters() {
   return {
     terms: state.terms, xterms: state.xterms, model: state.model, folder: state.folder, modelFolder: state.modelFolder,
     meta: state.meta, type: state.type, aspect: state.aspect, group: state.group, sets: state.sets, tags: state.tags, favOnly: state.favOnly,
-    hasNote: state.hasNote,
+    hasNote: state.hasNote, coll: state.coll,
     rmin: state.rmin, rmax: state.rmax,
     dfrom: state.dfrom, dto: state.dto,
     sort: state.sort, order: state.order,
@@ -592,6 +633,11 @@ function normalizeFilters(f) {
   o.tags = Array.isArray(f.tags) ? f.tags.slice() : [];
   o.favOnly = !!f.favOnly;
   o.hasNote = !!f.hasNote;
+  // A NUMBER, always: a snapshot saved before Groups existed has no key at all, and `undefined`
+  // would reach the URL as the string "undefined". 0 means no group, which is also what a
+  // snapshot naming a group that has since been deleted normalises to -- renderGroupList drops a
+  // filter whose group is gone rather than leaving the grid empty with nothing lit.
+  o.coll = Number(f.coll) || 0;
   // NO `o.roots` — and its absence is load-bearing rather than an omission. filtersFingerprint()
   // compares the whole KEY SET, so if this built a key that serializeFilters() no longer emits,
   // every stored snapshot would normalise to `roots: ['A']` against a live `roots: []` and read as
@@ -619,6 +665,7 @@ function applyFilters(f) {
   state.tags = n.tags;
   state.favOnly = n.favOnly;
   state.hasNote = n.hasNote;
+  state.coll = n.coll;
   state.rmin = n.rmin; state.rmax = n.rmax;
   state.dfrom = n.dfrom; state.dto = n.dto;
   state.sort = n.sort; state.order = n.order;
@@ -630,6 +677,9 @@ function applyFilters(f) {
   renderMediaType();
   renderAspect();
   if ($('#hasNote')) $('#hasNote').checked = state.hasNote;
+  // Lights the restored group's radio -- and, when the group has been deleted since, drops the
+  // filter instead of leaving an id nothing in the rail can explain or clear.
+  renderGroupList();
   if ($('#mfolder')) $('#mfolder').value = state.modelFolder;   // options refill on loadFacets
   renderSetsMode();
   // state holds the RAW metric value; the <option>s are the 1..10 scale. Same tol as the handlers.
@@ -1017,9 +1067,13 @@ async function applySnapshot(name) {
 // A snapshot's tags are ANDed, so one that no longer exists just empties the grid. Say so rather
 // than leaving it looking like a broken filter. Not auto-pruned: the tag list is scoped to the
 // visible libraries, so a tag can be absent here and still exist elsewhere.
-function warnMissingSnapshotTags() {
+async function warnMissingSnapshotTags() {
+  // Labels are a fixed list and cannot go missing; only the tags are worth the Tags half's fetch.
+  const want = (state.tags || []).filter(t => !t.startsWith('label:'));
+  if (!want.length) return;
+  await tagsNeeded('tags');
   const have = new Set((state._tags || []).map(t => t.name));
-  const gone = (state.tags || []).filter(t => !have.has(t));
+  const gone = want.filter(t => !have.has(t));
   if (gone.length) toast('Snapshot restored · ' +
     (gone.length === 1 ? '1 tag no longer exists' : `${gone.length} tags no longer exist`));
 }
@@ -1084,6 +1138,7 @@ async function loadFacets() {
   const p = new URLSearchParams({
     q: queryString(), model: state.model, folder: state.folder, mfolder: state.modelFolder,
     meta: state.meta, type: state.type, aspect: state.aspect, group: state.group ? '1' : '',
+    coll: state.coll || '',
     tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '', x: excludeString(),
     roots: rootsParam(), rmin: state.rmin, rmax: state.rmax,
     after: dateAfter(), before: dateBefore(),
@@ -1135,6 +1190,7 @@ function renderFacetDD(facet) {
     `<span class="fname">${esc(r.name)}</span><span class="fcount">${(r.count || 0).toLocaleString()}</span></div>`).join('');
   dd.querySelectorAll('.facet-sortmenu button[data-sort]').forEach(b =>
     b.classList.toggle('active', b.dataset.sort === _facetSort[facet]));
+  markCountTitles(dd);
 }
 function openFacetDD(facet) {
   closeMenus();
@@ -1168,6 +1224,9 @@ function closeMenus() {
   const va = $('#snapActions'); if (va) va.classList.add('hidden');
   const sm = $('#selMoreMenu'); if (sm) sm.classList.add('hidden');
   const smb = $('#selMore'); if (smb) smb.setAttribute('aria-expanded', 'false');
+  // #selGroupMenu carries .facet-panel, so closeFacetDDs already hid it -- this is only the
+  // aria the button owes a screen reader.
+  const sg = $('#selGroup'); if (sg) sg.setAttribute('aria-expanded', 'false');
 }
 function pickFacet(facet, val) {
   state[facet] = val;
@@ -1334,6 +1393,7 @@ function renderLibList(facetRoots) {
       `<button class="lib-more" data-more="${esc(r.key)}" title="Library actions" aria-haspopup="true" aria-label="Library actions"></button>` +
       `</div>`;
   }).join('');
+  markCountTitles(box);
   box.scrollTop = keepScroll;
   // No sizeTagList() here any more: the rail above the tag list is a fixed-height row now, so this
   // list's contents can't move the taglist's offset. Switching to the Tags tab and window resize
@@ -1407,54 +1467,355 @@ function labelName(slug) { const l = labelBySlug(slug); return l ? l.name : slug
 // for: every label read "0" for a moment and then jumped to its real number, which is a wrong
 // number on screen rather than an old one. A label with no count yet simply shows none.
 function labelCount(slug) {
-  if (!_tagsEverLoaded) return null;
-  const t = (state._tags || []).find(x => x.name === 'label:' + slug);
+  if (!_part.labels.ever) return null;
+  const t = (state._labelRows || []).find(x => x.name === 'label:' + slug);
   return t ? t.count : 0;
 }
 // The single active label filter (a `label:<slug>` entry in state.tags), or null.
-function activeLabel() { const t = (state.tags || []).find(x => x.startsWith('label:')); return t ? t.slice(6) : null; }
+// The STATUS being filtered on, if any. A flag in `state.tags` is not one and must not be
+// returned here -- the rail's exclusive highlight and the detail row both read this.
+function activeLabel() {
+  const t = (state.tags || []).find(x => x.startsWith('label:') && !isFlag(x.slice(6)));
+  return t ? t.slice(6) : null;
+}
+
+// The band under a card: its status, or its first flag when it has none. One band, so a file that
+// is both published and To refine shows the status -- the thing still asking for work.
+function labelStrip(it) {
+  const has = new Set(it.flags || []);
+  const slug = it.label || ((state.flags || []).find(f => has.has(f.slug)) || {}).slug;
+  return slug
+    ? `<div class="label-strip label-${esc(slug)}" title="${esc(labelName(slug))}">${esc(labelName(slug))}</div>` : '';
+}
 
 // POST a label change for `ids` (slug null = clear), then refresh cards + counts in place.
 async function applyLabels(ids, slug) {
   if (!ids.length) return;
-  await postJSON('/api/label', { ids, label: slug });
+  const j = await postJSON('/api/label', { ids, label: slug });
+  // A FLAG toggles server-side and must not land in `label`, the status slot.
+  const flag = isFlag(slug);
   ids.forEach(id => {
     const it = state.items.find(x => String(x.id) === String(id));
-    if (it) { it.label = slug; refreshCard(id); }
+    if (!it) return;
+    if (!flag) it.label = slug;
+    else it.flags = (it.flags || []).filter(f => f !== slug).concat(j.on ? [slug] : []);
+    refreshCard(id);
   });
   if (state.current && ids.map(String).includes(String(state.current.id))) {
-    state.current.label = slug; renderDetailLabels();
+    if (flag) {
+      const f = new Set(state.current.flags || []);
+      j.on ? f.add(slug) : f.delete(slug);
+      state.current.flags = [...f];
+    } else state.current.label = slug;
+    renderDetailLabels();
   }
-  loadTags();     // label counts live in the tag table
+  loadTags('labels');     // label counts live in the tag table
 }
 // Grid selection: toggle off only when every selected item already has this label, else set it.
 function labelSelection(slug) {
   const ids = [...selection].map(Number);
   if (!ids.length) return;
   const items = ids.map(id => state.items.find(x => String(x.id) === String(id))).filter(Boolean);
-  const allHave = items.length && items.every(it => it.label === slug);
   // The whole card, like the star and Hide — otherwise filtering to the label splits a pair
   // apart and the card comes back as a lone image. See expandCardIds.
+  // A FLAG is toggled by the server, which follows the first id so a mixed selection lands in one
+  // state. Only a status is cleared by sending null.
+  if (isFlag(slug)) return applyLabels(expandCardIds(ids), slug);
+  const allHave = items.length && items.every(it => it.label === slug);
   applyLabels(expandCardIds(ids), allHave ? null : slug);
 }
-// Sidebar Labels section: one row per label with swatch, name, count, hotkey; click filters
-// (single-select — labels are exclusive so an AND filter is meaningless), click again clears.
+// Sidebar Labels section: one row per label with swatch, name, count, hotkey; click filters, click
+// again clears. A STATUS row takes a radio (one at a time), a FLAG row a checkbox (any number, and
+// they combine) -- the same two spellings the Groups rows and Has notes already use. The box is
+// the row's state, not a second target: the row is the control.
 function renderLabelList() {
   const box = $('#labelList'); if (!box) return;
   const act = activeLabel();
-  const rows = (state.labels || []).map(l =>
+  const on = new Set((state.tags || []).filter(t => t.startsWith('label:')).map(t => t.slice(6)));
+  const count = n => `<span class="lcount">${n == null ? '' : n.toLocaleString()}</span>`;
+  const status = l =>
     `<div class="label-row${l.slug === act ? ' active' : ''}" data-label="${esc(l.slug)}" title="Filter to ${esc(l.name)}">` +
-    `<span class="lsw label-${esc(l.slug)}"></span>` +
-    `<span class="lname">${esc(l.name)}</span>` +
-    `<span class="lcount">${labelCount(l.slug) == null ? '' : labelCount(l.slug).toLocaleString()}</span>` +
-    `<span class="lkey">${esc(l.key)}</span></div>`).join('');
+    `<span class="lradio"></span><span class="lsw label-${esc(l.slug)}"></span>` +
+    `<span class="lname">${esc(l.name)}</span>${count(labelCount(l.slug))}` +
+    `<span class="lkey">${esc(l.key)}</span></div>`;
+  const tick = c => `<input type="checkbox" tabindex="-1" aria-hidden="true"${c ? ' checked' : ''}>`;
+  const flag = l =>
+    `<div class="label-row filter-check" data-label="${esc(l.slug)}" title="Filter to ${esc(l.name)}">` +
+    `${tick(on.has(l.slug))}<span class="lsw label-${esc(l.slug)}"></span>` +
+    `<span class="lname">${esc(l.name)}</span>${count(labelCount(l.slug))}` +
+    `<span class="lkey">${esc(l.key)}</span></div>`;
+  // FAVORITE IS A FLAG ON SCREEN ONLY. Its storage is the `source='fav'` row and its filter is
+  // `favOnly`, both as they were when this row lived in the Tags list. No keycap: it has no hotkey.
+  const fav = `<div class="label-row filter-check" data-fav="1" title="Filter to Favorite">` +
+    `${tick(state.favOnly)}<span class="lsw lsw-fav"></span>` +
+    `<span class="lname">Favorite</span>${count(state._favCount || 0)}</div>`;
   // NO "Unreviewed" ROW. It was retired on 2026-08-19 — see filterByLabel below.
-  box.innerHTML = rows;
+  box.innerHTML = `<div class="group-title">Status</div>` + (state.status || []).map(status).join('')
+    + `<div class="group-title">Flags</div>` + fav + (state.flags || []).map(flag).join('');
+  markCountTitles(box);
 }
+const isFlag = slug => (state.flags || []).some(f => f.slug === slug);
+
+// ---- what the rail's numbers count ---------------------------------------------------------------
+// EVERY NUMBER IN THE RAIL IS FILES; the grid's total is CARDS. They disagree whenever a card holds
+// more than one file -- a still and its video, a set of three, a song and its cover art -- so the
+// rail can read 19 beside a grid of 13 with nothing missing.
+//
+// This is the cheap half of the answer, and the same move the author took on 2026-08-20 for "Select
+// all 13 cards": NAME THE UNIT rather than change the number. Making the rail count cards is BR-2
+// and costs a merge pass on every filter change; this costs one attribute.
+//
+// NOT "Total files": the counts follow the active filters, so they are not totals -- saying so
+// would be wrong the moment anything is narrowing.
+const COUNT_TITLE = 'Files. One card can hold several.';
+// ONE HELPER, CALLED PER RENDER, rather than the string written into five innerHTML templates: a
+// sixth kind of count is certain eventually, and a sentence copied five times is a sentence that
+// ends up saying five things.
+function markCountTitles(root) {
+  (root || document).querySelectorAll('.lcount, .tcount, .fcount')
+    .forEach(el => { if (el.textContent.trim()) el.title = COUNT_TITLE; });
+}
+
+
+// ---- Groups -------------------------------------------------------------------------------------
+// A Group is a hand-picked LIST of files, independent of folder; a Snapshot is a saved QUERY. The
+// rail pane is the Labels component because clicking a row does the same thing in the same place --
+// narrow the grid -- and the one thing it adds is the radio, which says ONE AT A TIME.
+//
+// `coll` everywhere on the wire, never `group`: that name has meant the Video-pairs toggle since
+// long before this existed, and storage calls these collections for the matching reason on the
+// other side (see the schema note in index_db).
+// THE COUNTS FOLLOW THE FILTERS, like every other number in the rail -- and are blind to the
+// group's own selection, because Groups are exclusive: counting them under the group you already
+// picked would make every other one read 0. The server drops `coll`; this sends everything else.
+function groupCountParams() {
+  return new URLSearchParams({
+    q: queryString(), x: excludeString(), model: state.model, folder: state.folder,
+    mfolder: state.modelFolder, meta: state.meta, type: state.type, aspect: state.aspect,
+    group: state.group ? '1' : '', sets: state.sets ? '1' : '',
+    tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '',
+    roots: rootsParam(), rmin: state.rmin, rmax: state.rmax,
+    after: dateAfter(), before: dateBefore(),
+  });
+}
+// THE SAME LAZY RULE THE TAG COUNTS FOLLOW. The numbers go stale whenever the filters move; they
+// are re-asked by whoever looks at them next, which is immediately if the Groups tab is open and
+// never if it is not. No cache tier here -- the list is capped at 200 rows and the count is one
+// subquery, where the tag list is thousands of rows over millions of tag rows.
+let _groupsStale = false;
+function groupsWentStale() {
+  _groupsStale = true;
+  const sb = $('#sidebar');
+  if (sb && sb.classList.contains('tab-groups')) groupsNeeded();
+}
+function groupsNeeded() {
+  if (!_groupsStale) return Promise.resolve();
+  _groupsStale = false;
+  return loadGroups();
+}
+async function loadGroups() {
+  _groupsStale = false;      // this IS the refresh; nothing after it should re-ask
+  try {
+    const j = await getJSON('/api/groups?' + groupCountParams().toString());
+    state.groups = j.groups || [];
+  } catch (e) { state.groups = []; }
+  renderGroupList();
+  // The open file's chips are drawn from the same list, so a rename or a delete lands there too.
+  if (state.current) renderDetailGroups();
+}
+const groupById = id => (state.groups || []).find(g => g.id === Number(id)) || null;
+
+function renderGroupList() {
+  const box = $('#groupList'); if (!box) return;
+  // A FILTER POINTING AT A GROUP THAT IS GONE IS DROPPED HERE. A snapshot can name one deleted
+  // since it was saved, and leaving the id in place would empty the grid with nothing in the rail
+  // lit to explain it -- the filter would be invisible and unclearable.
+  if (state.coll && !groupById(state.coll)) state.coll = 0;
+  const q = (($('#groupSearch') || {}).value || '').trim().toLowerCase();
+  const rows = (state.groups || []).filter(g => !q || g.name.toLowerCase().includes(q));
+  if (!rows.length) {
+    box.innerHTML = '<div class="hint" style="padding:var(--space-2)">' +
+      (q ? 'No group matches. Press Enter to make it.'
+         : 'No groups yet. Select some files and press Group.') + '</div>';
+    return;
+  }
+  box.innerHTML = rows.map(g =>
+    `<div class="label-row${g.id === state.coll ? ' active' : ''}" data-group="${g.id}" ` +
+    `title="Show only the files in ${esc(g.name)}">` +
+    `<span class="lradio"></span>` +
+    `<span class="lname">${esc(g.name)}</span>` +
+    `<span class="lcount">${(g.count || 0).toLocaleString()}</span>` +
+    // Rename and Delete, on hover -- the same place and the same reveal as the tag list's ×.
+    `<button class="grow-more" data-group="${g.id}" title="Rename or delete this group" 
+     aria-label="Group actions">⋯</button></div>`).join('');
+  markCountTitles(box);
+}
+
+function filterByGroup(id) {
+  id = Number(id) || 0;
+  // ONE AT A TIME, which is what the radio promises: picking another replaces it, and picking the
+  // lit one clears. A Status row behaves the same way; a Flag or a tag does not.
+  state.coll = (state.coll === id) ? 0 : id;
+  renderGroupList();
+  renderTabBadges();
+  clearLoadedSnapshot();
+  search(true);
+}
+
+// ---- the picker -------------------------------------------------------------------------------
+// ONE CONTROL, BOTH DIRECTIONS. The button always says Group and always opens this; a row you are
+// already in unticks to remove. The earlier design swapped the button to "Remove" while the grid
+// was filtered to a group, which read oddly and -- worse -- made it impossible to take files out
+// of a group you were not currently looking at.
+//
+// A CHECKBOX, not the rail's radio, and the difference is the whole vocabulary: the rail FILTERS,
+// which is one group at a time, and this is MEMBERSHIP, which is many. The app already spells
+// "pick several" as a checkbox everywhere else.
+//
+// THREE STATES, because a selection can be partly in a group. Same rule the labels already use:
+// toggle off only when EVERY selected file is already in it, else add the rest.
+// `nSel` and not `of`: a local called `of` is indistinguishable from the `for...of`
+// keyword to anything reading this file as text, and tests/test_helper_scope.js duly
+// reported five unrelated functions as calling it.
+let _groupSel = { state: {}, nSel: 0 };
+
+function renderGroupPicker() {
+  const box = $('#groupPickList'); if (!box) return;
+  const raw = (($('#groupPick') || {}).value || '').trim();
+  const q = raw.toLowerCase();
+  const rows = (state.groups || []).filter(g => !q || g.name.toLowerCase().includes(q));
+  const exact = (state.groups || []).some(g => g.name.toLowerCase() === q);
+  const nSel = _groupSel.nSel || 0;
+  box.innerHTML =
+    rows.map(g => {
+      const n = _groupSel.state[String(g.id)] || 0;
+      const all = nSel > 0 && n >= nSel;
+      // "3 of 6" rather than a bare tick, because a partial row is the one you cannot read from a
+      // checkbox alone -- and it is exactly the row where what the click does needs explaining.
+      const part = n > 0 && !all ? `<span class="fcount">${n} of ${nSel}</span>` : '';
+      const title = all ? `Every selected file is in ${esc(g.name)} — click to take them out`
+                  : n > 0 ? `${n} of ${nSel} selected files are in ${esc(g.name)} — click to add the rest`
+                          : `Add the selected files to ${esc(g.name)}`;
+      return `<div class="facet-row grow-pick" data-group="${g.id}" title="${title}">` +
+             `<input type="checkbox" tabindex="-1" data-all="${all ? 1 : 0}"${all ? ' checked' : ''}>` +
+             `<span class="fname">${esc(g.name)}</span>${part}</div>`;
+    }).join('') +
+    (raw && !exact
+      ? `<div class="facet-row" data-new="1"><span class="fname">&#65291; Make &ldquo;${esc(raw)}&rdquo;</span></div>`
+      : '') +
+    (!rows.length && !raw
+      ? '<div class="hint" style="padding:var(--space-2)">Type a name to make your first group.</div>'
+      : '');
+  // Indeterminate is a PROPERTY, not an attribute -- it cannot be written into the html above.
+  box.querySelectorAll('.grow-pick').forEach(r => {
+    const g = Number(r.dataset.group);
+    const n = _groupSel.state[String(g)] || 0;
+    r.querySelector('input').indeterminate = n > 0 && n < nSel;
+  });
+  // NO markCountTitles here. The .fcount in these rows reads "1 of 4" -- a share of your
+  // SELECTION, not a count of files in the library -- so the files-vs-cards sentence would be
+  // answering a question this number is not asking. The row's own title says what the click does.
+}
+
+async function refreshGroupSel() {
+  const ids = [...selection].map(Number);
+  try {
+    const j = await postJSON('/api/groups/state', { ids });
+    _groupSel = { state: j.state || {}, nSel: j.of || ids.length };
+  } catch (e) {
+    _groupSel = { state: {}, nSel: ids.length };
+  }
+}
+
+async function openGroupPicker() {
+  if (!selection.size) return;
+  closeMenus();
+  const m = $('#selGroupMenu'), f = $('#groupPick');
+  if (!m || !f) return;
+  f.value = '';
+  _groupSel = { state: {}, nSel: selection.size };
+  renderGroupPicker();                 // draw immediately; the ticks land a moment later
+  m.classList.remove('hidden');
+  $('#selGroup').setAttribute('aria-expanded', 'true');
+  setTimeout(() => f.focus(), 20);
+  await refreshGroupSel();
+  if (!m.classList.contains('hidden')) renderGroupPicker();
+}
+
+// One click, and what it means depends on where the selection already stands. THE MENU STAYS OPEN:
+// putting a batch into three groups is one visit, and the ticks are the receipt for each one.
+async function groupToggleSelection(id) {
+  const ids = [...selection].map(Number);
+  if (!ids.length) return;
+  const g = groupById(id);
+  const n = _groupSel.state[String(id)] || 0;
+  const allIn = _groupSel.nSel > 0 && n >= _groupSel.nSel;
+  const j = allIn ? await postJSON('/api/groups/remove', { id: Number(id), ids })
+                  : await postJSON('/api/groups/add', { id: Number(id), ids });
+  if (j.error) return uiAlert(j.error, 'Group');
+  await refreshGroupSel();
+  renderGroupPicker();
+  await loadGroups();
+  if (state.coll) await refreshView({ keepScroll: true });
+  toast(allIn ? `${(j.removed || 0).toLocaleString()} removed from ${g ? g.name : 'the group'}.`
+              : `${(j.added || 0).toLocaleString()} added to ${g ? g.name : 'the group'}.`);
+}
+
+async function groupCreateFromSelection(name) {
+  const ids = [...selection].map(Number);
+  // ONE CALL that makes it and fills it: two would leave an empty group behind whenever the
+  // second failed, and "make this and put my selection in it" is one gesture to the user.
+  const j = await postJSON('/api/groups/create', { name, ids });
+  if (j.error) return uiAlert(j.error, 'Group');
+  await loadGroups();
+  // The new group is now one of the rows, ticked. Same reason the toggles leave the menu up: the
+  // tick is the receipt, and a menu that vanished would take it with it.
+  if ($('#groupPick')) $('#groupPick').value = '';
+  await refreshGroupSel();
+  renderGroupPicker();
+  toast(`${(j.added || 0).toLocaleString()} added to ${j.group.name}.`);
+}
+
+async function groupRename(id) {
+  const g = groupById(id); if (!g) return;
+  const name = await uiPrompt(`Rename “${g.name}” to:`, g.name);
+  if (name == null || !name.trim() || name.trim() === g.name) return;
+  const j = await postJSON('/api/groups/rename', { id: g.id, name: name.trim() });
+  if (j.error) return uiAlert(j.error, 'Group');
+  await loadGroups();
+}
+
+async function groupDelete(id) {
+  const g = groupById(id); if (!g) return;
+  // THE FILES ARE NOT TOUCHED, and the confirm has to say so in words. This is the one place in
+  // the app where a destructive verb sits beside a grid full of pictures, and "Delete group" is
+  // exactly what someone misreads at speed.
+  const n = g.count || 0;
+  const ok = await uiConfirm(
+    `Delete “${g.name}”? The ${n.toLocaleString()} file${n === 1 ? '' : 's'} stay ` +
+    `exactly where they are. Only the list goes.`,
+    { ok: 'Delete group', danger: true });
+  if (!ok) return;
+  const wasFiltering = state.coll === g.id;   // asked BEFORE the reload drops it
+  const j = await postJSON('/api/groups/delete', { id: g.id });
+  if (j.error) return uiAlert(j.error, 'Group');
+  await loadGroups();           // renderGroupList drops state.coll if it pointed here
+  renderTabBadges();
+  if (wasFiltering) await refreshView({ keepScroll: true });
+}
+
 function filterByLabel(slug) {
-  const on = activeLabel() === slug;
-  state.tags = (state.tags || []).filter(t => !t.startsWith('label:'));   // single-select
-  if (!on) state.tags.push('label:' + slug);
+  const tag = 'label:' + slug;
+  const had = (state.tags || []).includes(tag);
+  if (isFlag(slug)) {
+    // A FLAG NARROWS ON ITS OWN, and combines with a status: "published AND still to refine" is a
+    // question worth asking, and the whole point of it not being a status.
+    state.tags = had ? state.tags.filter(t => t !== tag) : (state.tags || []).concat(tag);
+  } else {
+    // One status at a time -- a file has one, so a second would always return nothing.
+    state.tags = (state.tags || []).filter(t => t.startsWith('label:') ? isFlag(t.slice(6)) : true);
+    if (!had) state.tags.push(tag);
+  }
   renderLabelList();
   search(true);
 }
@@ -1462,12 +1823,19 @@ function filterByLabel(slug) {
 function renderDetailLabels() {
   const box = $('#dLabels'); if (!box) return;
   const cur = state.current ? state.current.label : null;
-  box.innerHTML = (state.labels || []).map(l =>
-    `<button class="label-btn${l.slug === cur ? ' active' : ''}" data-label="${esc(l.slug)}" title="${esc(l.name)} (${esc(l.key)})">` +
-    `<span class="lsw label-${esc(l.slug)}"></span>${esc(l.name)}</button>`).join('');
+  const set = new Set((state.current && state.current.flags) || []);
+  // A flag's lit state comes from its own list, not from `label` -- a file can show a status and
+  // a flag at the same time, which is the whole point of the split.
+  const btn = l =>
+    `<button class="label-btn${(isFlag(l.slug) ? set.has(l.slug) : l.slug === cur) ? ' active' : ''}" data-label="${esc(l.slug)}" title="${esc(l.name)} (${esc(l.key)})">` +
+    `<span class="lsw label-${esc(l.slug)}"></span>${esc(l.name)}</button>`;
+  box.innerHTML = (state.status || []).map(btn).join('') + (state.flags || []).map(btn).join('');
 }
 function labelDetail(slug) {
   if (!state.current) return;
+  // A FLAG IS ALWAYS SENT AS ITSELF: the server toggles it. Sending null would clear the status
+  // instead, which is a different mark entirely.
+  if (isFlag(slug)) return applyLabels(detailMarkIds(state.current), slug);
   const cur = state.current.label;
   applyLabels(detailMarkIds(state.current), cur === slug ? null : slug);
 }
@@ -1489,11 +1857,21 @@ function labelDetail(slug) {
 // The filter state these counts were fetched under. Comparing it is what stops a "filter changed"
 // that changed nothing relevant from re-asking -- at boot the tab restore and the first refresh
 // both want them, and with a plain flag that was two identical requests for the same numbers.
-function tagsKey() {
-  return new URLSearchParams({
+function tagsKey(part) {
+  return new URLSearchParams({ part,
     q: queryString(), x: excludeString(), model: state.model, folder: state.folder,
     mfolder: state.modelFolder, meta: state.meta, type: state.type, aspect: state.aspect,
     group: state.group ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(),
+    // THE GROUP FILTER, and leaving it out was the bug the comment above this function warns
+    // about in as many words: the next filter gets forgotten here. Labels read 10 / 46 / 49 / 11
+    // across the whole library while the grid held one group, and clicking any of them gave
+    // nothing -- the exact "how many exist vs how many you would get" failure the counts were
+    // rebuilt to stop.
+    //
+    // Groups do NOT drop themselves here, unlike the label pick: a Group is not one of the three
+    // lists this endpoint disambiguates. It narrows the labels; the labels narrow it back through
+    // groupCountParams, which is the only builder that leaves `coll` out.
+    coll: state.coll || '',
     rmin: state.rmin, rmax: state.rmax, after: dateAfter(), before: dateBefore(),
     // SENT, and they were not before. The server needs them to tell the three lists apart: the tag
     // counts are blind to your tag ticks, the label counts to your label pick, and favourites to
@@ -1529,59 +1907,70 @@ function tagCachePut(key, value) {
   while (_tagCache.size > TAG_CACHE_MAX) _tagCache.delete(_tagCache.keys().next().value);
 }
 
-let _tagsKey = null;                   // what the numbers on screen describe
-let _tagsStale = true;                 // nothing fetched yet
-let _tagsEverLoaded = false;           // distinguishes "no count yet" from "a count of zero"
-let _tagsInFlight = null;
+// TWO HALVES, EACH KEPT FRESH ON ITS OWN. The Labels tab's numbers are index seeks; the Tags tab's
+// list is a pass over every tag row, 3s on his library. Until 2026-09-23 both came in one request,
+// so the Labels tab waited on a list it does not show.
+//   key   what the numbers on screen describe
+//   stale nothing fetched yet, or a filter moved
+//   ever  distinguishes "no count yet" from "a count of zero"
+const _part = {
+  labels: { key: null, stale: true, ever: false, flight: null },
+  tags:   { key: null, stale: true, ever: false, flight: null },
+};
+// The halves someone is looking at. The Tags tab is the only thing that shows the tag half; the
+// tag editor asks for it by name.
+function shownParts() {
+  const sb = $('#sidebar');
+  if (!sb) return [];
+  return sb.classList.contains('tab-labels') ? ['labels'] : sb.classList.contains('tab-tags') ? ['tags'] : [];
+}
 
 // Shown only if the wait outlasts the app's usual pause before admitting to any work -- the same
 // rule and the same delay as the grid's. A refresh that answers quickly shows nothing at all, and
 // the numbers already on screen stay put meanwhile rather than blanking: they are the previous
 // answer, not a wrong one, and a skeleton would be a second vocabulary for "updating".
-function markTagsBusy(on) {
-  const t = $('#taglist'), l = $('#labelList');
-  clearTimeout(markTagsBusy._t);
-  if (!on) {
-    if (t) t.classList.remove('stale');
-    if (l) l.classList.remove('stale');
-    return;
-  }
-  markTagsBusy._t = setTimeout(() => {
-    if (t) t.classList.add('stale');
-    if (l) l.classList.add('stale');
-  }, PANE_BUSY_DELAY_MS);
+function markTagsBusy(part, on) {
+  const el = part === 'labels' ? $('#labelList') : $('#taglist');
+  clearTimeout(markTagsBusy[part]);
+  if (!el) return;
+  if (!on) { el.classList.remove('stale'); return; }
+  markTagsBusy[part] = setTimeout(() => el.classList.add('stale'), PANE_BUSY_DELAY_MS);
 }
 
-// Fetch only if what is on screen is out of date. Concurrent callers share one request.
-function tagsNeeded() {
-  if (!_tagsStale && tagsKey() === _tagsKey) return Promise.resolve();
-  if (_tagsInFlight) return _tagsInFlight;
+// Fetch a half only if what it has is out of date. Concurrent callers share one request. With no
+// `part`, the half on screen, if any.
+function tagsNeeded(part) {
+  return Promise.all((part ? [part] : shownParts()).map(needPart));
+}
+function needPart(part) {
+  const s = _part[part], key = tagsKey(part);
+  if (!s.stale && key === s.key) return Promise.resolve();
+  if (s.flight) return s.flight;
   // A filter you had a moment ago. No request, no scrim, no wait -- which is the whole point of
   // keeping the last few: tick a tag, look, untick it is the commonest move in this pane.
-  const key = tagsKey();
   const hit = tagCacheGet(key);
-  if (hit) { applyTags(key, hit); return Promise.resolve(); }
+  if (hit) { applyTags(part, key, hit); return Promise.resolve(); }
   // Busy.during, so a failed request cannot strand the scrim -- the rule the whole module exists
   // for. The dimmed counts stay as the quiet half of the same state: the scrim says the pane is
   // working, the dim says these particular numbers are the old ones.
-  markTagsBusy(true);
-  _tagsInFlight = Busy.during('tab', () => _fetchTags()).finally(() => {
-    _tagsInFlight = null;
-    markTagsBusy(false);
+  markTagsBusy(part, true);
+  s.flight = Busy.during('tab', () => _fetchTags(part)).finally(() => {
+    s.flight = null;
+    markTagsBusy(part, false);
   });
-  return _tagsInFlight;
+  return s.flight;
 }
 
 // A filter changed, so the numbers no longer describe what you would get. If you are looking at
 // them, they are refreshed now; if you are not, the next person to look pays for it.
 function tagsWentStale() {
-  if (_tagsEverLoaded && tagsKey() === _tagsKey) return;   // nothing the counts depend on moved
-  _tagsStale = true;
-  const sb = $('#sidebar');
-  if (sb && (sb.classList.contains('tab-tags') || sb.classList.contains('tab-labels'))) tagsNeeded();
+  for (const p of Object.keys(_part)) {
+    if (!(_part[p].ever && tagsKey(p) === _part[p].key)) _part[p].stale = true;
+  }
+  tagsNeeded();
 }
 
-async function loadTags() {
+async function loadTags(part) {
   // THE SAME NARROWING THE GRID GETS. It used to send `roots` and nothing else, so every label,
   // tag and favourite count was a whole-library total: the rail read "To publish 10" beside a grid
   // holding one, which is how the author found it. The server drops `tags` and `fav` at its end so a tag
@@ -1600,28 +1989,38 @@ async function loadTags() {
   // The lazy path calls tagsNeeded() instead, which reads the cache and only comes here on a miss.
   // Written this way rather than as a tagCacheClear() beside each of the seven writers: that is the
   // fourteen-call-sites shape the Busy module exists to stop, and the eighth writer would forget.
+  //
+  // `part` is the half the change is known to touch: 'labels' for a label or a favourite, which
+  // leaves the tag NAMES alone, so the 3s tag pass waits until someone looks at it. With none, the
+  // tag half, because a tag was written and the editor's suggestions have to know it. Both go stale
+  // either way -- a label write moves the tag counts under a label filter -- and the half on screen
+  // is fetched now.
   tagCacheClear();
-  return _fetchTags();
+  for (const p of Object.keys(_part)) _part[p].stale = true;
+  const want = new Set(shownParts().concat(part || 'tags'));
+  return Promise.all([...want].map(_fetchTags));
 }
 
 // The fetch itself, cache-neutral. Shared by loadTags (which has just emptied the cache) and by
 // tagsNeeded (which has just missed it).
-async function _fetchTags() {
-  const key = tagsKey();
+async function _fetchTags(part) {
+  const key = tagsKey(part);
   const data = await getJSON('/api/tags?' + key);
   tagCachePut(key, data);
-  applyTags(key, data);
+  applyTags(part, key, data);
 }
 
 // Put an answer on screen, whether it came from the server a moment ago or from the cache.
-function applyTags(key, data) {
-  _tagsKey = key;
-  _tagsStale = false;
-  _tagsEverLoaded = true;
+function applyTags(part, key, data) {
+  Object.assign(_part[part], { key, stale: false, ever: true });
+  if (part === 'labels') {
+    state._labelRows = data.tags || [];
+    state._favCount = data.favorites || 0;
+    renderLabelList();
+    return;
+  }
   state._tags = data.tags || [];
-  state._favCount = data.favorites || 0;
   renderTagList();
-  renderLabelList();     // label counts come from the same tag table
   // Datalist + checklist exclude label: entries (they live in the Labels section, not Tags).
   $('#tagoptions').innerHTML = state._tags.filter(t => !t.name.startsWith('label:'))
     .map(t => `<option value="${esc(t.name)}">`).join('');
@@ -1674,9 +2073,8 @@ function clearTagFilters() {
 // payload would move that ordering into the client for no gain.
 function renderTagList() {
   const q = (($('#tagSearch') || {}).value || '').trim().toLowerCase();
-  const favChk = state.favOnly ? ' checked' : '';
-  // The trailing hidden .tagdel keeps the count aligned with tag rows (which have a real × button).
-  let html = `<label class="tagrow fav"><input type="checkbox" data-fav="1"${favChk}><span class="tname">Favorites</span><em class="tcount">${state._favCount || 0}</em><span class="tagdel" aria-hidden="true" style="visibility:hidden">×</span></label>`;
+  // Favorites was the first row here until it became a Flag in the Labels tab.
+  let html = '';
   for (const t of (state._tags || [])) {
     if (t.name.startsWith('label:')) continue;   // labels live in their own sidebar section
     if (q && !t.name.toLowerCase().includes(q)) continue;
@@ -1688,6 +2086,7 @@ function renderTagList() {
     html += `<label class="tagrow" title="${esc(t.name)}${mtitle}"><input type="checkbox" data-tag="${esc(t.name)}"${chk}><span class="tname">${esc(t.name)}</span><button class="tagdel" data-del="${esc(t.name)}" title="Delete tag everywhere">×</button></label>`;
   }
   $('#taglist').innerHTML = html;
+  markCountTitles($('#taglist'));
   renderTagChips();
 }
 // Type a new tag + Enter in the search box -> apply it to the currently selected images.
@@ -1973,8 +2372,7 @@ function cardHTML(it) {
   // unlabeled). The name is in the band rather than only in its `title` because colour alone can't
   // be read by everyone — see the .label-strip rule in style.css for the full reasoning. The title
   // stays: it is what a hover still offers when the band is too narrow to show the whole word.
-  const label = it.label
-    ? `<div class="label-strip label-${esc(it.label)}" title="${esc(labelName(it.label))}">${esc(labelName(it.label))}</div>` : '';
+  const label = labelStrip(it);
   // NB nothing marks a card as "unreviewed". A per-card dot was removed 2026-08-05 as carrying no
   // signal (filter by it and every card wears it; browse unfiltered and most of a library does),
   // and the sidebar filter that outlived it went the same way on 2026-08-19.
@@ -2132,9 +2530,9 @@ function tabCounts() {
   if (state.rmin !== '' || state.rmax !== '') filters++;
   if (state.dfrom || state.dto) filters++;
   if (state.hasNote) filters++;
-  const labels = (state.tags || []).filter(t => t.startsWith('label:')).length;
-  const tags = (state.tags || []).filter(t => !t.startsWith('label:')).length + (state.favOnly ? 1 : 0);
-  return { filters, labels, tags };
+  const labels = (state.tags || []).filter(t => t.startsWith('label:')).length + (state.favOnly ? 1 : 0);
+  const tags = (state.tags || []).filter(t => !t.startsWith('label:')).length;
+  return { filters, labels, tags, groups: state.coll ? 1 : 0 };
 }
 function renderTabBadges() {
   const c = tabCounts();
@@ -2148,13 +2546,14 @@ function renderTabBadges() {
 }
 const ACTIVE_TAB_KEY = 'cv:activeTab';
 function setActiveTab(name) {
-  if (!['filters', 'labels', 'tags'].includes(name)) name = 'filters';
+  if (!['filters', 'labels', 'tags', 'groups'].includes(name)) name = 'filters';
   const sb = $('#sidebar');
-  sb.classList.remove('tab-filters', 'tab-labels', 'tab-tags');
+  sb.classList.remove('tab-filters', 'tab-labels', 'tab-tags', 'tab-groups');
   sb.classList.add('tab-' + name);
   document.querySelectorAll('.filter-tabs .ftab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   try { localStorage.setItem(ACTIVE_TAB_KEY, name); } catch (e) {}
   if (name === 'tags' || name === 'labels') tagsNeeded();
+  if (name === 'groups') groupsNeeded();
   if (name === 'tags') sizeTagList();
 }
 // Where the tab panes begin, for the overlay that covers them. Measured rather than assumed: the
@@ -2214,7 +2613,7 @@ let _searchSeq = 0;   // supersede token: a filter change invalidates any in-fli
 function searchParams(offset, limit) {
   return new URLSearchParams({
     q: queryString(), x: excludeString(), model: state.model, folder: state.folder, mfolder: state.modelFolder, meta: state.meta,
-    type: state.type, aspect: state.aspect, group: state.group ? '1' : '', sets: state.sets ? '1' : '', tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(),
+    type: state.type, aspect: state.aspect, group: state.group ? '1' : '', sets: state.sets ? '1' : '', coll: state.coll || '', tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(),
     rmin: state.rmin, rmax: state.rmax, after: dateAfter(), before: dateBefore(),
     sort: state.sort, order: state.order, limit: (limit || state.limit), offset: offset,
     // Only meaningful to sort=random, and harmless otherwise. It MUST be identical for every page
@@ -2452,7 +2851,7 @@ const Busy = (() => {
         // flashing over content that is already readable; on the first visit the pane is empty, and
         // waiting 400ms to explain an empty pane is the case the author actually hit -- "the first
         // time I visited the tab, it was blank".
-        if (!_tagsEverLoaded) tEl.classList.add('slow');
+        if (!shownParts().every(p => _part[p].ever)) tEl.classList.add('slow');
         else tabT = setTimeout(() => tEl.classList.add('slow'), PANE_BUSY_DELAY_MS);
       } else {
         tEl.classList.add('hidden');
@@ -2549,6 +2948,12 @@ async function search(reset, opts) {
   // call that did nothing at all could still strand one.) A non-reset is still DROPPED by the
   // post-fetch check when a real reset supersedes it — that half is what the token is for.
   const seq = reset ? ++_searchSeq : _searchSeq;
+  // KEEP YOUR PLACE: a rebuild after something changed ON these files (a score, a post), not a new
+  // query. Ask for as many cards as are loaded now, so the offset you were at exists again, then
+  // scroll back to it. It was passed by six callers and read by none until 2026-09-23, so every
+  // one of them jumped to the top -- the author found it after a quality score. 500 is the server's page cap.
+  const keep = reset && opts && opts.keepScroll
+    ? { y: window.scrollY, n: Math.min(500, state.items.length) } : null;
   Trace.add('search', `${reset ? 'RESET (filter/sort change)' : 'page ' + state.offset} · sort=${state.sort} ${state.order}`
     + (reset ? '' : ` · asking for ${nextPageSize()}`));
   let paneTok = 0, moreTok = 0;
@@ -2567,7 +2972,7 @@ async function search(reset, opts) {
     // could sit at a whole-library total while the grid showed one card.
     // Facets are on the Filters tab, which is where you just clicked, so they refresh now. The tag
     // and label counts are behind a tab; they go stale and are re-asked when something needs them.
-    if (!opts || opts.facets !== false) { loadFacets(); tagsWentStale(); }
+    if (!opts || opts.facets !== false) { loadFacets(); tagsWentStale(); groupsWentStale(); }
     // The dim belongs to THIS search: hold its token and only it can lower it. A newer search
     // raising its own makes this one's token stale, and a stale release is a silent no-op — which is
     // the right answer for a superseded search and used to need a hand-written seq check at each of
@@ -2581,7 +2986,7 @@ async function search(reset, opts) {
   if (state.done) return;
   state.loading = true;
   if (!reset) moreTok = Busy.raise('more');   // QUIET: appending, so just a small marker
-  const limit = reset ? firstPageSize() : nextPageSize();
+  const limit = reset ? Math.max(firstPageSize(), keep ? keep.n : 0) : nextPageSize();
   // The thumbnail size is on this line because it is NOT a constant: it falls out of the card size
   // and the display's scaling together, and there is a real combination (an M card on a 1.5x
   // display, needing 288px) where it lands back on 512 and the bytes are unchanged. Without this
@@ -2601,7 +3006,7 @@ async function search(reset, opts) {
       $('#grid').innerHTML = '';
       state.items = [];            // kept in step with the DOM, not emptied ahead of it
       clearSelection();            // a new query/filter is a fresh result set
-      window.scrollTo(0, 0);       // the grid used to collapse to the top by being emptied early
+      if (!keep) window.scrollTo(0, 0);   // the grid used to collapse to the top by being emptied early
     }
     // A PAGING response carries no totals — they cost four library-wide counts and cannot have
     // changed since the page that opened this view (see api_search). `in`, not truthiness: 0 is a
@@ -2642,7 +3047,8 @@ async function search(reset, opts) {
     syncThumbsToCardWidth();
     tBuild(`${state.items.length} on screen of ${state.total}`);
     if (!reset) ScrollMetric.notePage();   // a page landing mid-scroll is the likeliest block
-    if (reset) {
+    if (keep) window.scrollTo(0, keep.y);
+    if (reset && !keep) {
       // Play the fade-up now the cards are in the DOM. remove -> reflow -> add is the standard way
       // to RESTART a CSS animation; without the reflow the browser coalesces it and the animation
       // never replays on the second and later swaps.
@@ -2792,6 +3198,10 @@ function updateSelBar() {
     const needsSelection = b.id !== 'selAll';
     b.setAttribute('aria-disabled', String(total === 0 || (needsSelection && n === 0)));
   }
+  // ONE VERB, ALWAYS. It said "Remove" while the grid was filtered to a group, which read oddly --
+  // the author's report -- and quietly meant you could only take files out of the group you
+  // happened to be looking at. Both directions live in the picker now: a row you are already in
+  // unticks.
 }
 function toggleSelect(card, shift) {
   const id = card.dataset.id;
@@ -2811,7 +3221,7 @@ function toggleSelect(card, shift) {
 }
 async function selectAllMatching() {
   const p = new URLSearchParams({ q: queryString(), x: excludeString(), model: state.model, folder: state.folder, mfolder: state.modelFolder,
-    meta: state.meta, type: state.type, aspect: state.aspect, group: state.group ? '1' : '', sets: state.sets ? '1' : '', tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(), rmin: state.rmin, rmax: state.rmax, after: dateAfter(), before: dateBefore(),
+    meta: state.meta, type: state.type, aspect: state.aspect, group: state.group ? '1' : '', sets: state.sets ? '1' : '', coll: state.coll || '', tags: state.tags.join(','), fav: state.favOnly ? '1' : '', note: state.hasNote ? '1' : '', roots: rootsParam(), rmin: state.rmin, rmax: state.rmax, after: dateAfter(), before: dateBefore(),
   });
   const data = await getJSON('/api/ids?' + p.toString());
   selection.clear();
@@ -3154,8 +3564,7 @@ function stripItemHTML(it, i) {
       // surface (the author's call): the whole face of a strip item is one navigation button, and a
       // clickable target inside it would be a small mis-hit away from jumping somewhere.
       `<span class="star${it.fav ? ' on' : ''}" aria-hidden="true">${ICON_STAR}</span>` +
-      (it.label
-        ? `<div class="label-strip label-${esc(it.label)}" title="${esc(labelName(it.label))}">${esc(labelName(it.label))}</div>` : '') +
+      labelStrip(it) +
       '</button>';
   }
 }
@@ -3348,12 +3757,14 @@ async function openDetail(id) {
   fillGenSettings(d);
   hideEmptyDetailFields(d);
   syncQualityDetail();
+  syncPostDetail();
   $('#dPos').value = d.positive || '';
   $('#dNeg').value = d.negative || '';
   // Export for Civitai is PNG-only (that's where the ComfyUI graph + a spliceable text chunk live).
   $('#dCivitaiExport').classList.toggle('hidden', d.is_video || (d.ext || '').toLowerCase() !== '.png');
   renderComfyButton(d);
   renderDetailTags();
+  renderDetailGroups();
   renderDetailLabels();
   const note = $('#dNote');
   note.value = d.note || '';
@@ -3446,6 +3857,77 @@ function applyOfflineState(d) {
   syncBlocked(offline);
   if (offline) $('#dCivitaiExport').classList.add('hidden');   // export must read the PNG
 }
+
+// ---- the open file's groups ---------------------------------------------------------------------
+// The rail answers "what is IN this group"; this answers "what does this file BELONG TO". Neither
+// substitutes for the other, and this is the only way to take ONE file out of ONE group without
+// filtering to that group first.
+function renderDetailGroups() {
+  const box = $('#dGroups'); if (!box) return;
+  // RECONCILED AGAINST THE LIVE LIST every time it draws. The open file's groups came down with
+  // the file, so renaming or deleting one in the rail would otherwise leave this panel showing a
+  // name that no longer exists -- and a x on it that removes from nothing. The id is the identity;
+  // the name is only what is currently printed on it.
+  const live = new Map((state.groups || []).map(g => [g.id, g.name]));
+  let mine = (state.current && state.current.groups) || [];
+  // FOR DISPLAY ONLY -- it does NOT write the filtered list back, and that was a bug: adding a
+  // brand-new group patched state.current.groups, drew, and the draw threw the new entry away
+  // because state.groups had not been re-read yet. The chip vanished and never came back, since
+  // the reload that would have vindicated it found nothing left to vindicate.
+  // Filtering per draw is idempotent and needs no write-back to stay correct.
+  if (live.size) {
+    mine = mine.filter(g => live.has(g.id)).map(g => ({ id: g.id, name: live.get(g.id) }));
+  }
+  box.innerHTML = mine.map(g =>
+    `<span class="chip"><span>${esc(g.name)}</span>` +
+    `<button data-rmgroup="${g.id}" title="Take this file out of ${esc(g.name)}"></button></span>`).join('');
+  // The datalist offers every group, so typing is completion rather than recall. Groups the file
+  // is ALREADY in are left out: offering one would be offering a no-op, and the chip above already
+  // says it is in there.
+  const have = new Set(mine.map(g => g.id));
+  const dl = $('#groupoptions');
+  if (dl) dl.innerHTML = (state.groups || []).filter(g => !have.has(g.id))
+    .map(g => `<option value="${esc(g.name)}"></option>`).join('');
+}
+
+// Typing a name here adds THIS file, making the group if the name is new -- the same gesture the
+// Add-tags box above it uses, for the same reason: the row is about this one file.
+async function detailAddGroup(name) {
+  name = (name || '').trim();
+  if (!name || !state.current) return;
+  const id = state.current.id;
+  const hit = (state.groups || []).find(g => g.name.toLowerCase() === name.toLowerCase());
+  const j = hit ? await postJSON('/api/groups/add', { id: hit.id, ids: [id] })
+                : await postJSON('/api/groups/create', { name, ids: [id] });
+  if (j.error) return uiAlert(j.error, 'Group');
+  const g = hit || j.group;
+  // THE LIST FIRST, THEN THE CHIP. A newly made group is not in state.groups until this returns,
+  // and renderDetailGroups only draws what is live -- so patching first drew nothing.
+  await loadGroups();                       // the rail's counts moved, and a new group is now in
+  // Patch the open file rather than re-reading it: the panel is showing this file right now, and a
+  // round trip would repaint every field to change one row.
+  state.current.groups = (state.current.groups || []).concat([{ id: g.id, name: g.name }])
+    .sort((a, b) => a.name.localeCompare(b.name));
+  renderDetailGroups();
+  if (state.coll) await refreshView({ keepScroll: true });   // and so may the grid, if it is filtered
+}
+
+// NO CONFIRM HERE, deliberately, where the selection-bar Remove has one. That one acts on a
+// selection you cannot fully see -- "Select all matching" can reach past the loaded page -- and
+// this acts on the single file in front of you, named on a chip you are pointing at. A confirm for
+// one visible thing is the speed bump the recycle confirm exists to be, on an action that is not
+// destructive at all.
+async function detailRemoveGroup(gid) {
+  if (!state.current) return;
+  const id = state.current.id;
+  const j = await postJSON('/api/groups/remove', { id: Number(gid), ids: [id] });
+  if (j.error) return uiAlert(j.error, 'Group');
+  state.current.groups = (state.current.groups || []).filter(g => g.id !== Number(gid));
+  renderDetailGroups();
+  await loadGroups();
+  if (state.coll) await refreshView({ keepScroll: true });
+}
+
 function renderDetailTags() {
   const tags = (state.current && state.current.tags) || [];
   $('#dTags').innerHTML = tags.filter(t => !t.startsWith('label:')).map(t =>   // labels shown as buttons, not chips
@@ -3518,7 +4000,7 @@ async function toggleDetailFav() {
   state.current.favorite = on;
   $('#dFav').classList.toggle('on', !!on);
   setCardFav(state.current.id, on);
-  loadTags();
+  loadTags('labels');
 }
 async function toggleCardFav(card) {
   const id = card.dataset.id;
@@ -3543,7 +4025,7 @@ async function toggleCardFav(card) {
   // request still lit the star locally and the next refresh silently put it back.
   if (r && r.error) return toast('Could not change the favorite.');
   setCardFav(id, on);
-  loadTags();
+  loadTags('labels');
 }
 
 // ---- Send to ComfyUI ---------------------------------------------------------------------------
@@ -3573,7 +4055,7 @@ async function renderComfyButton(d) {
   // 2026-09-12, and the bridge stopped being a package of its own when it was folded into the
   // nodes — so the one instruction the dimmed button gave sent people looking for a download that
   // does not exist. The author hit exactly that. What Help now explains, this has to agree with.
-  b.title = ready ? 'Open this workflow in ComfyUI'
+  b.title = ready ? 'Edit in ComfyUI'
                   : "ComfyUI isn't answering — start it, or install the VV nodes";
 }
 $('#dComfyOpen').addEventListener('click', async e => {
@@ -3609,7 +4091,7 @@ function openTagModal() {
   // The editor offers your existing tags as you type, and it opens from the grid and the detail
   // view -- neither of which has been anywhere near the Tags tab. So this is the other place that
   // has to ask for the list, and the reason it cannot simply key off which tab is showing.
-  tagsNeeded();
+  tagsNeeded('tags');
   $('#tagModal').classList.remove('hidden');
   setTimeout(() => $('#mTagInput').focus(), 30);
 }
@@ -3998,6 +4480,10 @@ async function applyMinedTags() {
   state.minerPicks = new Set();
   closeMinerModal();
   toast(`Applied ${j.tags_applied} tag${j.tags_applied === 1 ? '' : 's'} (${j.rows_added} added)`);
+  // loadTags, not just refreshView: refreshView re-asks for tag counts only when a FILTER moved, and
+  // applying tags moves none, so the Tags tab kept its old list. The comment above always said this
+  // call was here; it was not.
+  await loadTags();
   await refreshView();
 }
 function closeMinerModal() {   // just hide — the mined list is cached so Mine can reopen it
@@ -4057,7 +4543,7 @@ async function favSelected() {
   await fetch('/api/favorite', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids: expandCardIds(ids), on: true }) });
   ids.forEach(id => setCardFav(id, true));
-  await loadTags();
+  await loadTags('labels');
   toast(`Favorited ${ids.length}`);
 }
 
@@ -5059,6 +5545,19 @@ function syncQualityDetail() {
   Maxi.recaption();   // maximized, the caption is the only thing showing this score (see paintSetScores)
 }
 
+// THE PUBLISHING RECEIPT. Read-only: this row reports where a file went, it does not change it.
+// Opening goes to the browser, like the receipt dialog does -- the draft lives on Civitai and this
+// app has no view of it.
+function syncPostDetail() {
+  const d = state.current;
+  const p = d && d.post;
+  $('#dPostRow').classList.toggle('hidden', !p || !p.url);
+  if (!p || !p.url) return;
+  const others = p.images > 1 ? ` · ${p.images} files` : '';
+  $('#dPost').textContent = (p.at ? new Date(p.at * 1000).toLocaleDateString() : 'Civitai') + others;
+  $('#dPostOpen').onclick = () => window.open(p.url, '_blank', 'noopener');
+}
+
 // THE SAME BACKGROUND JOB THE SELECTION BAR USES, not a synchronous request. The author, 2026-09-10:
 // "if i run quality scorer from details view, it shows no countdown and the quality score never
 // appears." Both, and they were one fault wearing two faces.
@@ -5222,7 +5721,36 @@ function renderCardFactRows() {
       <button type="button" class="icon-btn fact-down" title="Move down" aria-label="Move ${esc(def.label)} down"${i === rows.length - 1 ? ' disabled' : ''}>&#9660;</button>
     </div>`;
   }).join('');
+  syncCardFactsNote();
 }
+// THE SIZE NAMES THE CONTROL USES, so the note can never name a size you cannot find. The grid's
+// own buttons read S / M / L / XL and carry these words in their tooltips; this list is the only
+// other place the full names appear, and the two must stay in step.
+const CARD_SIZE_NAMES = { 128: 'Small', 192: 'Medium', 256: 'Large', 512: 'Extra-large' };
+
+// The band is Large and Extra-large only (applyCardSize gates .cards-lg at 256), so below that
+// every row in this panel is configuring something invisible. The panel used to say so in a fixed
+// sentence at the top, which is true of the app but says nothing about the grid you have -- the
+// author spent a round of debugging on exactly this, convinced the values had stopped appearing.
+//
+// "SOME values", not "none": a song card keeps printing its duration from its own face at Small
+// and Medium (see cardFactsHTML), so a flat "none of these appear" would be wrong for audio.
+//
+// Called from applyCardSize as well as from here. The size control is NOT reachable while Settings
+// is open today -- the modal covers it, measured with elementFromPoint -- so that call is currently
+// redundant with the re-render on reopen. It is one line, and it is what keeps the note true by
+// construction rather than by depending on which paths happen to re-render: a keyboard shortcut for
+// size, or a non-modal Settings, would otherwise leave a sentence on screen that is a lie.
+function syncCardFactsNote() {
+  const el = $('#cardFactsNote');
+  if (!el) return;
+  const small = _cardPx < 256;
+  el.textContent = small
+    ? `Cards are currently set to ${CARD_SIZE_NAMES[_cardPx] || 'this size'}, so some values will not appear.`
+    : '';
+  el.classList.toggle('hidden', !small);
+}
+
 // Up/down rather than drag, the author's call: at this many rows you are never more than a few clicks from
 // any arrangement, it works from the keyboard, and there is no way to drop one in the wrong place.
 function moveCardFact(key, by) {
@@ -5259,8 +5787,8 @@ const THEME_GROUPS = [
   ['Surfaces & text', [['--bg', 'Background'], ['--bg2', 'Panel'], ['--bg3', 'Raised surface'],
             ['--sidebar-bg', 'Sidebar'],
             ['--fg', 'Text'], ['--muted', 'Muted text'], ['--border', 'Border']]],
-  ['Badges & tags', [['--reward-bg', 'Quality badge'], ['--tag-fav', 'Favorite tag']]],
-  ['Labels', [['--label-publish', 'To publish'], ['--label-published', 'Published'],
+  ['Badges & tags', [['--reward-bg', 'Quality badge'], ['--tag-fav', 'Favorite row']]],
+  ['Labels', [['--label-publish', 'To post'], ['--label-published', 'Posted'],
             ['--label-refine', 'To refine'], ['--label-explore', 'To explore'],
             ['--label-video', 'For video']]],
 ];
@@ -5890,7 +6418,7 @@ async function refreshView(opts) {
   const o = opts || {};
   const paintGrid = o.grid === 'prepend' ? () => prependNewImages()
                   : o.grid === 'none'    ? null
-                  : () => search(true, { facets: false });
+                  : () => search(true, { facets: false, keepScroll: !!o.keepScroll });
   const gridJob = !paintGrid ? Promise.resolve()
                 : o.afterJob ? refreshAfterJob(paintGrid)
                 : paintGrid();
@@ -5903,7 +6431,8 @@ async function refreshView(opts) {
   // are re-asked by whoever looks at them next; if a tab showing them is already open, that is
   // immediately. At boot the restored tab has been set before this runs, so the same rule decides
   // whether the rail waits for them at all.
-  const jobs = [loadFacets(), Promise.resolve(tagsWentStale()), gridJob];
+  const jobs = [loadFacets(), Promise.resolve(tagsWentStale()),
+                Promise.resolve(groupsWentStale()), gridJob];
   if (o.changes) jobs.push(fetchChanges());
   await Promise.allSettled(jobs);
   markActiveFilters();
@@ -6027,7 +6556,10 @@ function applyExtensions() {
             || state.extensions.some(e => e.active && e.produces === kind);
     el.classList.toggle('hidden', !on);
   });
-  document.querySelectorAll('[data-ext]').forEach(el => {
+  // NOT the Settings panels, which carry data-ext to say whose they are: the Settings tabs decide
+  // which of those shows, and an off extension's panel still has to open. Matching them here
+  // un-hid every active extension's panel under the Extensions list whenever a switch moved.
+  document.querySelectorAll('[data-ext]:not(.settings-panel)').forEach(el => {
     const on = extActive(el.dataset.ext);
     // An <option> can't take the class: `.hidden` is scoped per component, and a display rule
     // doesn't remove an option from a select's keyboard navigation. The HTML attribute does both.
@@ -6112,6 +6644,20 @@ function extFieldRow(e, f) {
       ${help ? `<p class="set-help">${esc(help)}</p>` : ''}
     </div>`;
   }
+  if (f.type === 'select') {
+    // `quiet-field`, the same class the card-details rows use for their place picker -- this is the
+    // app's form select and there is no second one. The options come from the manifest and are
+    // re-checked server side, so what is drawn here is a convenience rather than the authority.
+    const opts = (f.options || []).map(o =>
+      `<option value="${esc(o.value)}"${String(val) === String(o.value) ? ' selected' : ''}>` +
+      `${esc(o.label)}</option>`).join('');
+    control = `<select class="quiet-field" id="${esc(id)}" data-ext-field="${esc(f.key)}">${opts}</select>`;
+    return `<div class="set-row">
+      <label for="${esc(id)}">${esc(f.label)}</label>
+      ${control}
+      ${help ? `<p class="set-help">${esc(help)}</p>` : ''}
+    </div>`;
+  }
   if (f.type === 'textarea') {
     control = `<textarea id="${esc(id)}" data-ext-field="${esc(f.key)}" rows="4"
       spellcheck="false"${ph}>${esc(val == null ? '' : String(val))}</textarea>`;
@@ -6126,6 +6672,152 @@ function extFieldRow(e, f) {
     ${help ? `<p class="set-help">${esc(help)}</p>` : ''}
   </div>`;
 }
+
+
+// ---- the publish log ----------------------------------------------------------------------------
+// The author, 2026-09-22: "without that, the publishing is a bit of a black box." A successful post
+// already left a receipt and simply never appeared as a list; a failed one left nothing at all,
+// which is the half that made it opaque -- a success announces itself with a dialog and a link.
+//
+// DRAWN BY KIND, not by name: any `produces: "post"` extension gets this, the same way a tagger
+// gets its menu item without the app knowing what it is called.
+async function renderPostLog(panel) {
+  const box = panel.querySelector('.postlog-body');
+  if (!box) return;
+  let entries = [];
+  try {
+    const j = await getJSON('/api/post/log?limit=100');
+    entries = j.entries || [];
+  } catch (e) {
+    box.innerHTML = '<p class="set-help">Could not read the log.</p>';
+    return syncPostLogBar(panel);
+  }
+  // Kept on the panel so Retry can find its row without asking again. The panel IS the working
+  // copy here, the same arrangement the settings fields have.
+  panel._postLog = entries;
+  if (!entries.length) {
+    box.innerHTML = '<p class="set-help">Nothing posted yet from this library.</p>';
+    // SYNCED ON EVERY EXIT, and the two early ones are what this line is for. Forgetting the last
+    // entries redrew the list empty and left the bar behind, still reading "Forget 9 entries" over
+    // "Nothing published yet" -- the author's screenshot. The bar is derived from the ticked boxes,
+    // so any path that rewrites the list has to re-derive it; a path that returns first does not
+    // get to skip that.
+    return syncPostLogBar(panel);
+  }
+  box.innerHTML = entries.map(e => {
+    const when = e.at ? new Date(e.at * 1000).toLocaleString() : '';
+    const files = `${e.files || 0} file${e.files === 1 ? '' : 's'}`;
+    // A title is optional on a post, so the row falls back to saying what it was rather than
+    // leaving the column blank -- a blank cell reads as data we lost.
+    const what = e.title ? esc(e.title) : `<span class="set-help">(no title)</span>`;
+    // A CHECKBOX, the app's spelling of "pick several". The row is only ever selected, never
+    // opened, so there is nothing for a click on the row itself to do -- the box is the control.
+    const tick = `<input type="checkbox" class="pl-pick" data-key="${esc(e.key || '')}">`;
+    if (!e.ok) {
+      // NO "Stopped." PREFIX HERE. The stored sentence already begins with it, and prefixing gave
+      // "Stopped. Stopped." -- the author's screenshot. The `stopped` flag stays as DATA, which is
+      // what styling and any future filter want; it is not a second source of wording.
+      //
+      // THE WORKER'S OWN SENTENCE. It distinguishes the two cases that need opposite advice --
+      // nothing was created, or something may already be on the account -- and a generic "Failed"
+      // would throw exactly that away.
+      return `<div class="postlog-row bad">
+        ${tick}
+        <span class="pl-when">${esc(when)}</span>
+        <span class="pl-what">${what}</span>
+        <span class="pl-files">${esc(files)}</span>
+        <span class="pl-note">${esc(e.error || '')}</span>
+        ${(e.ids || []).length
+            ? `<button type="button" class="tertiary btn-sm pl-retry" data-key="${esc(e.key)}"
+                >Retry</button>`
+            // A failure recorded before retry existed has no ids to send. It lists normally and
+            // simply offers nothing -- better than a button that would have to explain itself.
+            : '<span class="pl-open"></span>'}
+      </div>`;
+    }
+    // "Created as draft" is a FACT ABOUT THE PAST, not a current status. Nothing here hears about
+    // the post again, so a row claiming "Draft" would be wrong the moment you publish it on the
+    // site -- and re-checking would mean a network call per row on a settings page.
+    const credited = e.resource ? ` · ${esc(e.resource)}` : '';
+    return `<div class="postlog-row">
+      ${tick}
+      <span class="pl-when">${esc(when)}</span>
+      <span class="pl-what">${what}</span>
+      <span class="pl-files">${esc(files)}</span>
+      <span class="pl-note">Created as draft${credited}</span>
+      ${e.url ? `<a class="pl-open" href="${esc(e.url)}" target="_blank" rel="noopener">Open</a>`
+              : '<span class="pl-open"></span>'}
+    </div>`;
+  }).join('');
+  syncPostLogBar(panel);
+}
+
+// The bar under the list. HIDDEN UNTIL SOMETHING IS TICKED rather than dimmed: it is one
+// destructive verb with nothing else beside it, and a permanently greyed Delete under a list you
+// are only reading is a control asking to be misread.
+function syncPostLogBar(panel) {
+  const bar = panel.querySelector('.postlog-bar');
+  if (!bar) return;
+  const n = panel.querySelectorAll('.pl-pick:checked').length;
+  bar.classList.toggle('hidden', n === 0);
+  const btn = bar.querySelector('.postlog-del');
+  if (btn) btn.textContent = n === 1 ? 'Forget 1 entry' : `Forget ${n} entries`;
+}
+
+// FORGET, NOT DELETE, and the word is the point: this removes the record at THIS end. The post on
+// Civitai is not ours to delete -- it lives somewhere a person who is not this app can edit -- and
+// a button saying Delete beside a link to it would read as removing the post itself.
+async function postLogForget(panel) {
+  const keys = [...panel.querySelectorAll('.pl-pick:checked')].map(c => c.dataset.key).filter(Boolean);
+  if (!keys.length) return;
+  const ok = await uiConfirm(
+    `Forget ${keys.length} log ${keys.length === 1 ? 'entry' : 'entries'}? ` +
+    `This removes the record here. Anything already posted stays on Civitai — this app cannot ` +
+    `delete it there.`,
+    { ok: 'Forget', danger: true });
+  if (!ok) return;
+  const j = await postJSON('/api/post/log/delete', { keys });
+  if (j.error) return uiAlert(j.error, 'Post log');
+  await renderPostLog(panel);
+}
+
+document.addEventListener('change', e => {
+  const c = e.target.closest('.pl-pick');
+  if (c) syncPostLogBar(c.closest('.settings-panel[data-ext]'));
+});
+// RETRY IS OFFERED ON A FAILURE ONLY. On a success it would mean a duplicate post on Civitai, one
+// click away in a list -- and the site is where you would manage that, not here.
+//
+// THE OLD ROW IS LEFT ALONE. The log is a record of what happened, and a retry that erased the
+// attempt it came from would be rewriting it; a successful retry writes its own row alongside.
+async function postLogRetry(panel, key) {
+  const entry = (panel._postLog || []).find(x => x.key === key);
+  if (!entry || !(entry.ids || []).length) return;
+  const ext = (state.extensions || []).find(x => x.id === panel.dataset.ext);
+  if (!ext) return;
+  // SETTINGS CLOSES FIRST. The compose dialog and the job's progress both belong over the grid,
+  // not stacked on a settings window that would still be sitting there when the post finished --
+  // and the run's own result dialog (with the link to the draft) has to be the thing in front.
+  // The panel is re-rendered anyway, so the log is fresh the next time it is opened.
+  await closeSettings();
+  await publishFiles(entry.ids, ext, entry.values || {});
+  await renderPostLog(panel);
+}
+
+document.addEventListener('click', e => {
+  const r = e.target.closest('.pl-retry');
+  if (r) return postLogRetry(r.closest('.settings-panel[data-ext]'), r.dataset.key);
+  const b = e.target.closest('.postlog-del');
+  if (b) postLogForget(b.closest('.settings-panel[data-ext]'));
+  const a = e.target.closest('.postlog-all');
+  if (a) {
+    const panel = a.closest('.settings-panel[data-ext]');
+    const boxes = [...panel.querySelectorAll('.pl-pick')];
+    const every = boxes.length && boxes.every(x => x.checked);
+    boxes.forEach(x => { x.checked = !every; });
+    syncPostLogBar(panel);
+  }
+});
 
 function renderExtTabs() {
   const nav = $('.settings-nav'), panels = $('.settings-panels');
@@ -6160,19 +6852,37 @@ function renderExtTabs() {
           <button class="secondary ext-test" data-id="${esc(e.id)}">Test connection</button>
           <p class="set-help">Checks what is typed above, without saving it.</p>
           <span class="set-test ext-test-status"></span>
+        </div>` : '')
+      // BY KIND. A post extension makes ONE thing out of a whole selection and that thing lives
+      // somewhere else, so the only record at this end is what was sent and when. Nothing else
+      // needs a log: a score and a tag land in a column you can already look at.
+      + (e.produces === 'post' ? `<div class="set-row postlog">
+          <div class="field-head">Posted from this library</div>
+          <div class="postlog-body"><p class="set-help">Reading…</p></div>
+          <div class="postlog-bar hidden">
+            <button type="button" class="tertiary btn-sm postlog-all">Select all</button>
+            <button type="button" class="danger btn-sm postlog-del">Forget</button>
+          </div>
         </div>` : '');
     panels.appendChild(panel);
+    if (e.produces === 'post') renderPostLog(panel);
   }
 }
 
 // What one extension's panel currently holds. The panel IS the working copy — it is rebuilt from
 // the server's echo on every save — so there is no second place for the two to disagree.
-function readExtPanel(panel) {
+// ONE READER for both places a schema-drawn form is shown: the settings panel, and the compose
+// dialog. Two copies would be two answers to "is an unticked checkbox false or absent", and the
+// server coerces what it is sent against the same schema either way.
+function readExtFields(root) {
   const values = {};
-  panel.querySelectorAll('[data-ext-field]').forEach(el => {
+  root.querySelectorAll('[data-ext-field]').forEach(el => {
     values[el.dataset.extField] = el.type === 'checkbox' ? el.checked : el.value;
   });
-  return { id: panel.dataset.ext, values };
+  return values;
+}
+function readExtPanel(panel) {
+  return { id: panel.dataset.ext, values: readExtFields(panel) };
 }
 function readExtSettings() {
   return [...document.querySelectorAll('.settings-panel[data-ext]')].map(readExtPanel);
@@ -6261,6 +6971,15 @@ function extAction(e) {
     return { label: `Tag with ${e.name}`, bulk: `Tag with ${e.name}`,
              run: () => tagImages([state.current.id], e.id),
              runBulk: ids => tagImages(ids, e.id) };
+  }
+  if (e.produces === 'post') {
+    // BULK ONLY, and that is not a limitation to work around later: this kind makes ONE thing out
+    // of the whole selection, so a single image is the batch of one it has always been and the
+    // detail view's entry runs the same path with one id.
+    return { label: `${e.name}…`, bulk: `${e.name}…`,
+             bulkHint: 'Post the selected files together as one draft',
+             run: () => publishFiles([state.current.id], e),
+             runBulk: ids => publishFiles(ids, e) };
   }
   if (e.produces === 'text') {
     // Both scopes, and they END DIFFERENTLY, which is the whole reason they are two code paths:
@@ -6394,6 +7113,142 @@ async function askText(id, extId) {
     },
     summary: () => '',
   });
+}
+
+// ---- publishing a selection as one post ---------------------------------------------------------
+// The one kind of run that makes a single thing out of the whole selection, so it is the only one
+// that asks a question before it starts: a post has a title, and nothing else in the app does.
+//
+// EVERY CONTROL IN THAT DIALOG IS DRAWN FROM THE EXTENSION'S OWN SCHEMA by the same code that draws
+// its settings panel. An extension supplies no markup here any more than it does there -- which was
+// the whole objection to putting publishing in an extension, and turns out to dissolve once you
+// notice that a post editor is a form.
+async function publishFiles(ids, ext, prefill) {
+  ids = (ids || []).filter(x => x != null).map(Number);
+  if (!ids.length) { toast('Select files first'); return; }
+  if (!(ext.secrets_set || []).length) {
+    // The likeliest first run, and it is not an error: there is simply no key yet. Said before
+    // anything is uploaded rather than as a failure afterwards.
+    uiAlert(`Add your Civitai key under Settings → Extensions → ${ext.name} first.`,
+            ext.name);
+    return;
+  }
+  // WHAT WILL ACTUALLY GO, ASKED OF THE SERVER. Posting works in FILES, not cards -- the author's
+  // call, 2026-09-22 -- and this is the call that makes that visible. The strip used to be built
+  // from the loaded grid, one thumbnail per CARD, so a card's other members had no entry: a
+  // still+video pair, an image set, or an LTX run's silent video beside the one with audio all
+  // went out unseen. You could look at six pictures and send eleven files.
+  // SETS OFF MEANS THESE FILES AND NO OTHERS: every file is its own card, so the selection already
+  // is the file list. A retry is exact as well -- its ids are what the first attempt sent.
+  const exact = !!prefill || (!state.group && !state.sets);
+  const pv = await postJSON('/api/post/preview', { ids, exact });
+  const files = (pv && pv.files) || [];
+  if (!files.length) {
+    uiAlert(prefill ? 'None of those files are in the library any more.' : 'Nothing to post.',
+            ext.name);
+    return;
+  }
+  // ONLY ON A RETRY. Elsewhere the ids came from a selection you are looking at; here they came
+  // from a record of something you did earlier, and a file recycled since would otherwise go
+  // missing between the log row's count and the strip with nothing said.
+  if (prefill && files.length < ids.length) {
+    const gone = ids.length - files.length;
+    const ok = await uiConfirm(
+      `${gone} of those ${ids.length} files ${gone === 1 ? 'is' : 'are'} no longer in the ` +
+      `library. Post the remaining ${files.length}?`, { ok: 'Continue' });
+    if (!ok) return;
+  }
+
+  // THE CAP, ON THE REAL NUMBER, and before the dialog opens rather than after you have written a
+  // title. The server refuses too and that is the guarantee; this is so the refusal is not a
+  // surprise at the end.
+  const cap = ext.max_items || 0;
+  if (cap && files.length > cap) {
+    const extra = files.filter(f => f.came_with).length;
+    uiAlert(`${ext.name} takes at most ${cap} files in one post, and this is ${files.length}.` +
+            (extra ? ` ${extra} of them came with a card you selected — a video and its still both ` +
+                     `go, and a set sends every member.` : '') +
+            ` Deselect some, or turn Sets off to pick single files.`, ext.name);
+    return;
+  }
+
+  // Every file, with the ones you did not choose marked. A file with no thumbnail yet still gets a
+  // cell -- its name is what identifies it, and an omitted cell is exactly the old bug.
+  const strip = files.map(f => ({ name: f.name, thumb_url: f.thumb_url, came_with: f.came_with }));
+
+  // EVERY DIALOG STARTS FRESH. It used to carry the last run's answers forward, on the theory that
+  // a second post would want the first one's wording. It does not: a title and a description belong
+  // to ONE post, and the second post opening with the first one's text is a wrong answer already
+  // filled in -- the author hit exactly that. Reported as a bug, and it was.
+  //
+  // So each field starts at your SAVED SETTING where it overrides one, and at the manifest's
+  // default otherwise. That distinction is the whole point of an override: "open drafts on .red" is
+  // answered once in Settings and the dialog has to agree with it, while a title has no default
+  // anyone could have set.
+  const fields = ext.compose || [];
+  const saved = ext.values || {};
+  const settingKeys = new Set((ext.settings || []).map(f => f.key));
+  const values = {};
+  for (const f of fields) {
+    // A RETRY IS THE ONE CASE THAT CARRIES TEXT FORWARD, and it is not the bug the fresh-dialog
+    // rule exists to stop. That rule is about the NEXT post opening with the LAST one's wording --
+    // a wrong answer already filled in. Here you asked to repeat this particular attempt, so its
+    // wording is the right answer already filled in.
+    if (prefill && Object.prototype.hasOwnProperty.call(prefill, f.key)) {
+      values[f.key] = prefill[f.key];
+      continue;
+    }
+    values[f.key] = (settingKeys.has(f.key) && saved[f.key] != null && saved[f.key] !== '')
+                    ? saved[f.key]
+                    : (f.default != null ? f.default : (f.type === 'checkbox' ? false : ''));
+  }
+  const composed = await _dlgOpen({
+    title: ext.name,
+    // THE FILE COUNT, not the selection's. They differ whenever a card holds more than its face,
+    // and the difference is the thing the author could not see: "6 selected" became eleven files.
+    msg: `${files.length} file${files.length === 1 ? '' : 's'}, posted together in this order.` +
+         (files.some(f => f.came_with)
+            ? ` ${files.filter(f => f.came_with).length} came with a card you selected.` : ''),
+    ok: 'Create draft', strip, fields, values,
+  });
+  if (!composed) return;
+  const j = await postJSON('/api/post/run', { ids, exact, ext: ext.id, values: composed });
+  if (j.error) { uiAlert(j.error, ext.name); return; }
+  return Job.start({
+    name: 'publishing', blockedMsg: 'A job', every: 700,
+    statusUrl: '/api/post/status', stopUrl: '/api/post/stop',
+    // The PHASE, not just a count. One 200MB video is a single item, so a bare "0/1" sits frozen
+    // for minutes and looks identical to a run that has died.
+    progress: s => ({ pct: s.total ? Math.round(100 * s.seen / s.total) : null,
+                      text: s.phase || `${ext.name} · ${fmtTime(s.elapsed)}` }),
+    finish: async (s) => {
+      if (s && s.post && s.post.url) {
+        await refreshView({ keepScroll: true });     // the label may have changed on these files
+        return showPostResult(s.post, ext.name);
+      }
+      // A run that ended with no post. `fatal` is the worker's own sentence, and the two cases it
+      // distinguishes need opposite advice: nothing was created, or something may have been.
+      const why = (s && s.fatal) || (s && s.error) || (s && s.stopped
+        ? 'Stopped. Anything already uploaded is left on Civitai, and no post was created.'
+        : 'Nothing was posted.');
+      uiAlert(why, ext.name);
+    },
+    summary: () => '',
+  });
+}
+
+function showPostResult(post, extName) {
+  // A DRAFT ON THE SITE IS ITS OWN RECEIPT, which is why this is the whole of the bookkeeping: the
+  // post either opens or it does not, and nothing here has to reconcile a remote object it does not
+  // own. Open goes to the browser rather than anywhere in this app.
+  const what = post.images === 1 ? '1 file' : `${post.images} files`;
+  const credited = post.resource ? `
+Model credited: ${post.resource}` : '';
+  return _dlgOpen({
+    title: 'Draft created',
+    msg: `${what} posted as a draft. It is not public until you publish it there.${credited}`,
+    ok: 'Open the draft', cancel: 'Close',
+  }).then(v => { if (v === true) window.open(post.url, '_blank', 'noopener'); });
 }
 
 // ---- answers over a selection ------------------------------------------------------------------
@@ -6534,7 +7389,7 @@ function watchReward(after) {
     // the old grid and the badges arrived a beat later.
     finish: async () => {
       if (after) { await after(); return; }
-      await refreshAfterJob(() => search(true));
+      await refreshView({ afterJob: true, keepScroll: true });
     },
     summary: s => { if (!s) return ''; const { fails, dev } = bits(s);
       return s.stopped ? `Stopped · ${(s.ok || 0).toLocaleString()} scored${fails} · ${fmtTime(s.elapsed)}`
@@ -7203,6 +8058,11 @@ async function loadRoots() {
   state.roots = cfg.roots || [];
   state.activeRoot = cfg.active || null;   // server's default management target (not user-facing)
   if (Array.isArray(cfg.labels)) { state.labels = cfg.labels; renderLabelList(); }
+  // Two kinds under one umbrella: a Status is exclusive, a Flag is not. Fall back to
+  // treating everything as a Status, so an older server still paints a working rail.
+  if (Array.isArray(cfg.status)) state.status = cfg.status; else state.status = cfg.labels || [];
+  if (Array.isArray(cfg.flags)) state.flags = cfg.flags; else state.flags = [];
+  renderLabelList();
   if (Array.isArray(cfg.metric_range) && cfg.metric_range.length === 2) state.metricRange = cfg.metric_range;
   if (Array.isArray(cfg.extensions)) { state.extensions = cfg.extensions; applyExtensions(); }
   state.snapshots = Array.isArray(cfg.snapshots) ? cfg.snapshots : [];
@@ -7826,6 +8686,7 @@ function applyCardSize(px) {
   // size, so a badge went from 12.5% of a Small card to 3.1% of this one. cards-lg cannot do both
   // jobs -- it also turns the second facts tier on, which XL does not want twice.
   $('#grid').classList.toggle('cards-xl', px >= 512);
+  syncCardFactsNote();                   // Settings can be open while this control is used
   document.querySelectorAll('#cardSize button').forEach(b =>
     b.classList.toggle('active', Number(b.dataset.size) === px));
   try { localStorage.setItem(CARD_SIZE_KEY, String(px)); } catch (e) {}
@@ -7840,7 +8701,9 @@ function applyCardSize(px) {
 }
 document.querySelectorAll('#cardSize button').forEach(b =>
   b.addEventListener('click', () => applyCardSize(Number(b.dataset.size))));
-applyCardSize(Number(localStorage.getItem(CARD_SIZE_KEY)) || 192);   // restore saved size on load
+// L by default (the author, 2026-09-23): the smallest size that shows the card details, so a new
+// user sees them without looking for a setting. A size you have picked is kept.
+applyCardSize(Number(localStorage.getItem(CARD_SIZE_KEY)) || 256);   // restore saved size on load
 $('#dfrom').addEventListener('change', e => { state.dfrom = e.target.value; search(true); });
 $('#dto').addEventListener('change', e => { state.dto = e.target.value; search(true); });
 // one × per date row, each clearing only its own field
@@ -8105,6 +8968,15 @@ function mdToHtml(src, prefix = '') {
       continue;
     }
 
+    // `<!-- group: Name -->` starts a group in the contents list and draws nothing here. It lives
+    // in the doc, so moving a section between groups is an edit to help.md. Any other comment is
+    // an author's note and is dropped.
+    if (/^<!--.*-->\s*$/.test(ln)) {
+      const g = /^<!--\s*group:\s*(.+?)\s*-->/.exec(ln);
+      if (g) out.push(`<span class="help-group" data-group="${esc(g[1])}" hidden></span>`);
+      i++; continue;
+    }
+
     const h = /^(#{1,6})\s+(.*)$/.exec(ln);
     if (h) {
       out.push(`<h${h[1].length} id="${prefix}${mdSlug(h[2])}">${inline(h[2])}</h${h[1].length}>`);
@@ -8175,20 +9047,46 @@ async function loadHelp() {
     }
     parts.push(`<section id="doc-${s.key}" data-doc="${s.key}">${mdToHtml(md, s.prefix)}</section>`);
   }
+  // EACH EXTENSION'S OWN HELP.md, after the app's, which ends with its Extensions section: each is a
+  // subsection of that, under the extension's name. Installed ones only, switched off included:
+  // reading how one works is how you decide to switch it on. The heading is the app's, and the
+  // extension's own headings are pushed one level down beneath it, so it cannot restyle the
+  // contents list.
+  // NO LIVE STATE in here, not even whether it is switched on. The author, 2026-09-23: Help is the
+  // manual; the app is where state shows.
+  for (const e of (state.extensions || []).filter(x => x.has_help)) {
+    let md;
+    try {
+      const r = await fetch('/api/doc?name=' + encodeURIComponent('ext:' + e.id));
+      if (!r.ok) throw new Error(r.status);
+      md = await r.text();
+    } catch { continue; }   // one extension's missing help must not blank the app's
+    const md2 = `### ${e.name}\n\n${md.replace(/^(#{2,5})(?=\s)/gm, '#$1')}`;
+    parts.push(`<section class="help-ext" id="doc-ext-${esc(e.id)}" data-doc="ext-${esc(e.id)}">` +
+               `${mdToHtml(md2, `ext-${e.id}-`)}</section>`);
+  }
   doc.innerHTML = `<div class="help-col">${parts.join('')}</div>`;
   buildHelpToc();
   _helpLoaded = true;
 }
 
-// One entry per section, in document order. It used to build three named groups across two
-// documents; there is one short document now, and a contents list that needs its own headings is
-// a contents list for a document that is too long.
+// One entry per section, in document order, under the group headings help.md marks with
+// `<!-- group: Name -->`. Each installed extension is an entry in the Extensions group, though in the
+// document it is a subsection of How extensions work. The
+// groups were dropped once when help shrank to one short document; they came back 2026-09-23,
+// when it had grown to ten sections and gained Extensions.
 function buildHelpToc() {
   const toc = $('#helpToc');
   toc.innerHTML = '';
-  for (const h of $('#helpDoc').querySelectorAll('h2')) {
+  for (const el of $('#helpDoc').querySelectorAll('.help-group, h2, .help-ext > h3:first-child')) {
+    if (el.classList.contains('help-group')) {
+      const g = document.createElement('div');
+      g.className = 'group-title'; g.textContent = el.dataset.group;
+      toc.appendChild(g);
+      continue;
+    }
     const b = document.createElement('button');
-    b.type = 'button'; b.textContent = h.textContent; b.dataset.target = h.id;
+    b.type = 'button'; b.textContent = el.textContent; b.dataset.target = el.id;
     toc.appendChild(b);
   }
 }
@@ -8222,10 +9120,10 @@ $('#btnHelp').addEventListener('click', () => openHelp());
 // the button opened Help at the top and looked like it simply scrolled badly. Older bug, found
 // 2026-09-08 while adding the second of these. If a heading is renamed, both of these move with it.
 $('#settingsHelp').addEventListener('click', () => openHelp('ref-settings-and-what-each-one-starts-as'));
-// Recycling's blurb. The detail lives in Things that surprise people, which is where the
+// Recycling's blurb. The detail has its own Help section, Recycling, which is where the
 // network-drive behaviour is written out.
 $('#helpRecycling').addEventListener('click', () => {
-  closeSettings(); openHelp('ref-things-that-surprise-people');
+  closeSettings(); openHelp('ref-recycling');
 });
 $('#helpClose').addEventListener('click', closeHelp);
 $('#help').querySelector('.overlay-bg').addEventListener('click', closeHelp);
@@ -8501,7 +9399,6 @@ $('#rename .overlay-bg').addEventListener('click', closeRename);
 $('#taglist').addEventListener('change', e => {
   const cb = e.target;
   if (!cb.dataset) return;
-  if (cb.dataset.fav) { state.favOnly = cb.checked; search(true); return; }
   if (cb.dataset.tag) {
     const name = cb.dataset.tag, i = state.tags.indexOf(name);
     if (cb.checked && i === -1) state.tags.push(name);
@@ -8522,12 +9419,77 @@ $('#taglist').addEventListener('click', e => {
 $('#tagSearch').addEventListener('input', renderTagList);
 $('#tagSearch').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addTagToSelection(e.target.value); } });
 // Labels: sidebar rows filter (single-select); detail buttons set/clear the current image's label.
+
+// ---- Groups: events -----------------------------------------------------------------------------
+// The rail list. One delegated handler for the whole pane, so a repaint cannot strand a listener.
+let _groupMenuId = 0;
+$('#groupList').addEventListener('click', e => {
+  const more = e.target.closest('.grow-more');
+  if (more) {
+    e.stopPropagation();
+    _groupMenuId = Number(more.dataset.group) || 0;
+    const m = $('#groupActions');
+    closeMenus();
+    placeMenu(m, more);
+    return;
+  }
+  const row = e.target.closest('.label-row[data-group]');
+  if (row) filterByGroup(row.dataset.group);
+});
+$('#groupActions').addEventListener('click', e => {
+  const b = e.target.closest('button[data-act]'); if (!b) return;
+  closeMenus();
+  if (b.dataset.act === 'rename') groupRename(_groupMenuId);
+  if (b.dataset.act === 'delete') groupDelete(_groupMenuId);
+});
+// Typing narrows the list; Enter on a name that matches nothing makes it. THE RAIL FIELD MAKES AN
+// EMPTY GROUP -- unlike the picker, which always has a selection to put in it. That is the only
+// way to make one before you have chosen any files, and it is why an empty group is allowed to
+// exist at all.
+$('#groupSearch').addEventListener('input', renderGroupList);
+$('#groupSearch').addEventListener('keydown', async e => {
+  if (e.key !== 'Enter') return;
+  const name = e.target.value.trim();
+  if (!name) return;
+  const j = await postJSON('/api/groups/create', { name });
+  if (j.error) return uiAlert(j.error, 'Group');
+  e.target.value = '';
+  await loadGroups();
+});
+
+// The selection bar's Group button, and its picker.
+$('#selGroup').addEventListener('click', e => {
+  e.stopPropagation();
+  const m = $('#selGroupMenu');
+  if (m && !m.classList.contains('hidden')) { closeMenus(); return; }
+  openGroupPicker();
+});
+$('#groupPick').addEventListener('input', renderGroupPicker);
+$('#groupPick').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const raw = e.target.value.trim();
+  if (!raw) return;
+  // Enter takes the exact match if there is one, and makes the name otherwise -- so typing a
+  // group you already have and pressing Enter adds to it rather than erroring on a duplicate.
+  const hit = (state.groups || []).find(g => g.name.toLowerCase() === raw.toLowerCase());
+  if (hit) groupToggleSelection(hit.id); else groupCreateFromSelection(raw);
+});
+$('#selGroupMenu').addEventListener('click', e => {
+  e.stopPropagation();
+  const row = e.target.closest('.facet-row'); if (!row) return;
+  if (row.dataset.new) return groupCreateFromSelection(($('#groupPick').value || '').trim());
+  if (row.dataset.group) groupToggleSelection(row.dataset.group);
+});
+
 $('#labelList').addEventListener('click', e => {
+  if (e.target.closest('[data-fav]')) { state.favOnly = !state.favOnly; renderLabelList(); search(true); return; }
   const r = e.target.closest('[data-label]'); if (r) filterByLabel(r.dataset.label);
 });
 $('#dLabels').addEventListener('click', e => { const b = e.target.closest('[data-label]'); if (b) labelDetail(b.dataset.label); });
 // detail tags + favorite
 $('#dTagInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addDetailTag(e.target.value); } });
+// Its suggestions are the tag half, which only the Tags tab otherwise asks for.
+$('#dTagInput').addEventListener('focus', () => tagsNeeded('tags'));
 // Picking an existing tag from the datalist adds the chip immediately (no Enter needed).
 // A pick inserts the whole option at once: Chromium reports inputType 'insertReplacementText';
 // other browsers report a null inputType, so treat a null-inputType value that exactly matches a
@@ -8540,6 +9502,13 @@ $('#dTagInput').addEventListener('input', e => {
   }
 });
 $('#dTags').addEventListener('click', e => { const b = e.target.closest('[data-rmtag]'); if (b) removeDetailTag(b.dataset.rmtag); });
+$('#dGroups').addEventListener('click', e => { const b = e.target.closest('[data-rmgroup]'); if (b) detailRemoveGroup(b.dataset.rmgroup); });
+$('#dGroupInput').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const v = e.target.value;
+  e.target.value = '';
+  detailAddGroup(v);
+});
 // Notes: auto-save (debounced while typing, and immediately on blur — e.g. before navigating away).
 // Persists to images.note and updates the grid card's ✎ indicator in place.
 let _noteTimer = null;
@@ -9158,6 +10127,9 @@ async function boot() {
     state.updateCheck = !(cfg.general && cfg.general.update_check === false);     // absent means ON
     const savedFilters = loadSavedFilters(state.activeRoot);
     restoreRootsSel(savedFilters);   // the library SCOPE — before applyFilters, which never touches it
+    // BEFORE applyFilters, because a restored filter may name a group: renderGroupList drops a
+    // `coll` pointing at one that no longer exists, and it can only know that once the list is in.
+    await loadGroups();
     applyFilters(savedFilters);      // restore the saved filters on startup
     restoreLoadedSnapshot();   // and the snapshot they came from, if they still match it
     _appVersion = cfg.version || '';

@@ -137,6 +137,46 @@ CREATE TABLE IF NOT EXISTS quality (
 );
 
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+
+-- GROUPS: a hand-picked list of files, independent of folder. Unordered, many per file.
+--
+-- NAMED `collections` AND NOT `groups`, WHICH IS THE ONE THING TO KNOW HERE. `images.group_id`
+-- already means a SET -- the still, the upscale and the video that one run produced -- and it has
+-- meant that since long before this table existed. A table called `groups` sitting beside that
+-- column would make the column actively misleading, and the two are unrelated: a Set is DERIVED at
+-- scan time from what the files say about themselves, a Group is CHOSEN by the user and the index
+-- has no opinion about it. The UI says Group; storage says collection; those two words meet here
+-- and nowhere else.
+--
+-- A Snapshot is a QUERY (a saved filter set, in config.json, library-agnostic). This is a LIST.
+-- That is why it is rows in the index rather than more config: a list of ids is only meaningful
+-- against the library those ids live in, and it has to die with the rows if they are deleted.
+--
+-- NOT IN THE `tags` TABLE, which is where curation Labels live. Tags are per-image strings and a
+-- Group is an object with a name you rename -- renaming a tag would mean rewriting every row, and
+-- an EMPTY group could not exist at all, so making one before you fill it would be impossible.
+CREATE TABLE IF NOT EXISTS collections (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+-- Case-insensitive, because the name is the handle the user types in the picker and "Ocean" and
+-- "ocean" being two different groups is a typo that costs you files.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_name ON collections(name COLLATE NOCASE);
+
+-- ON DELETE CASCADE on BOTH sides, and both are load-bearing: deleting a group must not leave
+-- orphan membership rows, and RECYCLING A FILE must not leave a group counting a file that is gone.
+-- Foreign keys are off by default in SQLite, so the delete paths enforce this themselves; the
+-- declaration is here so the intent is readable beside the table it describes.
+CREATE TABLE IF NOT EXISTS collection_members (
+    collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    image_id      INTEGER NOT NULL REFERENCES images(id)      ON DELETE CASCADE,
+    added_at      REAL NOT NULL,
+    PRIMARY KEY (collection_id, image_id)
+);
+-- The PK covers "what is in this group"; this one covers "what groups is this file in", which is
+-- the question the detail panel asks once per opened file.
+CREATE INDEX IF NOT EXISTS idx_collection_members_image ON collection_members(image_id);
 """
 
 
@@ -565,6 +605,37 @@ def recompute_groups(conn, root_id=None):
     conn.commit()
 
 
+
+def _backfill_post_reverse_keys(conn):
+    """Give posts made before 2026-09-21 the per-file key the detail view looks up.
+
+    `civitai:post:<id>` has always carried the file list; `civitai:image:<id>` is new, and without
+    it a file posted before this build reports no post and its Posted row never appears -- the
+    feature would look broken on exactly the posts that already exist. Costs one query on a library
+    that has never posted, which is nearly all of them.
+    """
+    try:
+        rows = conn.execute("SELECT key, value FROM meta WHERE key LIKE 'civitai:post:%'").fetchall()
+    except Exception:
+        return
+    if not rows:
+        return
+    posts = []
+    for r in rows:
+        try:
+            rec = json.loads(r[1])
+        except Exception:
+            continue
+        posts.append((rec.get('at') or 0, r[0].rsplit(':', 1)[-1], rec.get('ids') or []))
+    # NEWEST FIRST, and INSERT OR IGNORE below. Two things rest on that order: a file that is
+    # already keyed (posted by a build that writes the key) keeps what it has, and a file in two
+    # OLD posts lands on the later one -- which is the draft you would want to open.
+    posts.sort(key=lambda p: p[0], reverse=True)
+    pairs = [('civitai:image:%d' % i, pid)
+             for _, pid, ids in posts for i in ids if isinstance(i, int)]
+    if pairs:
+        conn.executemany("INSERT OR IGNORE INTO meta(key, value) VALUES(?,?)", pairs)
+
 SCHEMA_VERSION = 5  # bump when the FTS layout changes (5 = index song lyrics too)
 
 # WHAT THIS BUILD CAN GET OUT OF A FILE. Every row records the version that read it, so a row read
@@ -604,7 +675,11 @@ SCHEMA_VERSION = 5  # bump when the FTS layout changes (5 = index song lyrics to
 # this would have stayed blank in the Details pane for good, with nothing on screen suggesting a
 # rescan would help. Caught while writing the 1.2 notes, which promise the offer appears: the
 # claim is what found the gap, so the notes were doing the job a claim is supposed to do.
-READER_VERSION = 6
+# 6 (2026-09-20): set for 1.2.1.
+# 7 (2026-09-23): a run with no negative prompt no longer reports a LoRA node's text as one. The
+# fix landed 09-21 without a bump, so every file read under 6 kept the wrong negative and would
+# have carried it to Civitai. Caught the same way as 5: while checking what the 1.3 notes promise.
+READER_VERSION = 7
 
 # How many files a forced run must actually read before its speed is worth remembering. Enough to
 # level out a slow first folder, small enough that a modest library still produces a number.
@@ -719,6 +794,7 @@ def _migrate(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_images_size ON images(size)")        # sort-by-largest
     conn.execute("CREATE INDEX IF NOT EXISTS idx_images_root ON images(root_id)")             # merged-DB root filter
     conn.execute("CREATE INDEX IF NOT EXISTS idx_images_root_group ON images(root_id, group_id)")
+    _backfill_post_reverse_keys(conn)
     # The sidebar's two boot queries (server.api_tags), which held the rail dimmed for seconds
     # after the grid was usable. Both are COVERING indexes — the query is answered without ever
     # opening an images or tags ROW, which is the whole point: a row carries the prompt text, and
@@ -851,8 +927,8 @@ def _fts_delete(conn, rowid):
 
 
 def delete_by_ids(db_path, ids):
-    """Remove images (and their FTS + tag rows) by id. Returns count removed.
-    Caller is responsible for the actual files (e.g. moving them to the trash)."""
+    """Remove images (and their FTS, tag, quality and group-membership rows) by id. Returns count
+    removed. Caller is responsible for the actual files (e.g. moving them to the trash)."""
     if not ids:
         return 0
     conn = connect(db_path)
@@ -864,6 +940,11 @@ def delete_by_ids(db_path, ids):
         conn.execute("DELETE FROM images WHERE id=?", (iid,))
         conn.execute("DELETE FROM tags WHERE image_id=?", (iid,))
         conn.execute("DELETE FROM quality WHERE image_id=?", (iid,))
+        # Group membership goes with the file. SQLite does not enforce the declared foreign key
+        # unless PRAGMA foreign_keys is on, so this is the enforcement -- without it a group keeps
+        # counting a file that is in the recycle bin, and clicking the group shows fewer cards than
+        # its own count promised.
+        conn.execute("DELETE FROM collection_members WHERE image_id=?", (iid,))
         removed += 1
     conn.commit()
     conn.close()
@@ -1468,6 +1549,7 @@ def scan(root, db_path, thumbs_dir=None, progress=None, should_stop=None, count_
                 # inflating tag + favorite counts)
                 conn.execute("DELETE FROM tags WHERE image_id=?", (rid,))
                 conn.execute("DELETE FROM quality WHERE image_id=?", (rid,))
+                conn.execute("DELETE FROM collection_members WHERE image_id=?", (rid,))
                 removed += 1
 
     # Sweep any orphans left by older versions of the prune above (cheap: indexed PKs).
@@ -1499,6 +1581,7 @@ def scan(root, db_path, thumbs_dir=None, progress=None, should_stop=None, count_
                 conn.execute("DELETE FROM images WHERE id=?", (rid,))
                 conn.execute("DELETE FROM tags WHERE image_id=?", (rid,))
                 conn.execute("DELETE FROM quality WHERE image_id=?", (rid,))
+                conn.execute("DELETE FROM collection_members WHERE image_id=?", (rid,))
                 removed += 1
 
     # Store the folder-mtime signature so a later cheap changes_detected() can flag "rescan me"
@@ -1613,14 +1696,15 @@ def merge_roots(merged_path, roots):
 
 
 def delete_root(db_path, root_id):
-    """Remove every row belonging to `root_id` (images + their FTS + tag/quality rows) from the
-    merged DB. Used when a root is deleted with 'also delete its index'. Returns images removed."""
+    """Remove every row belonging to `root_id` (images + their FTS, tag, quality and
+    group-membership rows) from the merged DB. Used when a root is deleted with 'also delete its index'. Returns images removed."""
     conn = connect(db_path)
     ids = [r[0] for r in conn.execute("SELECT id FROM images WHERE root_id IS ?", (root_id,))]
     for iid in ids:
         _fts_delete(conn, iid)
         conn.execute("DELETE FROM tags WHERE image_id=?", (iid,))
         conn.execute("DELETE FROM quality WHERE image_id=?", (iid,))
+        conn.execute("DELETE FROM collection_members WHERE image_id=?", (iid,))
     conn.execute("DELETE FROM images WHERE root_id IS ?", (root_id,))
     conn.execute("DELETE FROM meta WHERE key=?", ('dir_sig:' + root_id,))
     conn.commit()
