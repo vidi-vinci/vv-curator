@@ -116,7 +116,10 @@ your Python, and a few view preferences your browser keeps for the page.
   decision to every matching set in the folder.
 - **Export for Civitai** — a copy whose metadata Civitai reads, with your checkpoint and LoRAs
   auto-linked by hash. Or get it right at generation time with the companion nodes.
-- **Curate with one keystroke** — five exclusive labels, favorites, tags and notes.
+- **Curate with one keystroke** — a status for what a file needs next, flags for what is true about
+  it, tags, notes, and hand-picked Groups.
+- **Post to Civitai** — send a selection up as one draft, without leaving the app. An optional
+  extension, switched off until you turn it on.
 - **Shuffle the whole library.** A random order that never repeats or skips as you page through it —
   the best way to turn up things you'd forgotten you made.
 - **Save a Snapshot** — capture an entire filter state under a name and come back to it.
@@ -132,6 +135,20 @@ your Python, and a few view preferences your browser keeps for the page.
 Indexes PNG, JPG, WebP and GIF, video (MP4, WebM, MOV) and audio (MP3, FLAC, WAV, Opus, M4A). The
 embedded workflow is a bonus on the formats that carry one — files without metadata are browsable
 like any other.
+
+## Posting to Civitai
+
+It needs a Civitai API key, set up once:
+
+1. On Civitai, go to **Settings → Security & Apps → API Keys** and create a new key. Give it
+   **Media & Posts** read and write, and **Profile** read. Leave **AI Services** write off: it can
+   spend Buzz.
+2. Save the key somewhere safe, such as a password manager.
+3. In VV Curator, open **Settings → Extensions**, switch on **Post to Civitai**, and paste the key
+   into its page.
+
+Then select files and choose **Post to Civitai…** from the selection bar's `⋯` menu. They go up as
+one draft, and nothing is public until you publish it on Civitai.
 
 ## The ComfyUI companion
 

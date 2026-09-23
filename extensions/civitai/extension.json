@@ -13,7 +13,7 @@
       "label": "Key",
       "type": "password",
       "placeholder": "paste your Civitai API key",
-      "help": "From Civitai → account settings → API keys. Give it Media & Posts read and write, and Profile read. Leave AI Services write off — it can spend Buzz. Never sent back to this page."
+      "help": "On Civitai: Settings → Security & Apps → API Keys. Save it somewhere safe, such as a password manager. Give it Media & Posts read and write, and Profile read. Leave AI Services write off — it can spend Buzz. Never sent back to this page."
     },
     {
       "key": "site",

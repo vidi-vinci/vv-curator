@@ -7,10 +7,17 @@ else, and nothing at any other time. The key stays on this machine, in `config.j
 
 ### Posting
 
-Switch it on under Settings → Extensions and paste your Civitai API key into its page. Give the key
-Media & Posts read and write, and Profile read. Then select files and choose **Post to Civitai…**
-from the selection bar's `⋯` menu. They go up as one **draft**: nothing is public until you
-publish it on Civitai.
+It needs a Civitai API key, set up once:
+
+1. On Civitai, go to **Settings → Security & Apps → API Keys** and create a new key. Give it
+   **Media & Posts** read and write, and **Profile** read. Leave **AI Services** write off: it can
+   spend Buzz.
+2. Save the key somewhere safe, such as a password manager.
+3. In VV Curator, open **Settings → Extensions**, switch on **Post to Civitai**, and paste the key
+   into its page.
+
+Then select files and choose **Post to Civitai…** from the selection bar's `⋯` menu. They go up as
+one **draft**: nothing is public until you publish it on Civitai.
 
 **With Sets on, a card sends every file in it**, so a still and its video both go. That is usually
 what you want: Civitai reads the LoRAs from the still, and a video posted without one arrives with
