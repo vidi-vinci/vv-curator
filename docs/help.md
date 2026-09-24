@@ -90,6 +90,10 @@ it, tells you what a rescan would cost, and offers to do it. **Do it later** is 
 asks again next time you start the app, and the same job is always available from
 Libraries → Rescan all libraries….
 
+It names how many of your libraries are behind, not just that some are. **Don’t show this again**
+stops it asking about this version for good; a later version that reads more still asks, because
+that is a different question. It is remembered per browser.
+
 Libraries that are offline at that moment are skipped and named, and you are asked about them again
 when they are back. Stopping a rescan part way is safe — the next offer is about what is left, not
 the whole library again.
