@@ -21,9 +21,16 @@ What this pins, and why each one can rot quietly:
      its old stamps, so it is offered again next launch.
   5. **The menu has one scan verb**, and the all-libraries action lives in the menu that is about all
      the libraries.
-  6. **"Do it later" is remembered for the session, not forever.** sessionStorage is "until you next
-     start the app"; localStorage would be "never again in this browser" and config "never again on
-     this machine" — and a postponed rescan that never returns is a lost one.
+  6. **Two tiers, and they must not collapse into one.** "Do it later" stays sessionStorage —
+     "until you next start the app" — because a postponed rescan that never returns is a
+     lost one. The **Don't show this again** checkbox (the author, 2026-09-23) is the other answer
+     and does persist, but KEYED ON THE READER VERSION, so a build that reads more asks again:
+     his rule was "if they download a new version, then the 'Don't show again' should reset". A
+     bare localStorage key would be "never again", and the user would never learn that a later
+     version had left their library behind.
+  7. **The sentence counts libraries, and its verb follows the numerator.** "1 of 4 libraries WAS
+     indexed by an older version." The old wording said "Your libraries" and implied every one of
+     them was stale, when usually only some are.
 
 Runs in-process on an ephemeral port against a temp data dir. Touches no real library.
 """
@@ -185,8 +192,14 @@ check('Rescan all libraries lives in the Libraries menu, above Add library',
       'libRescanAll must come first')
 
 print('the offer')
+# The old form of this forbade localStorage outright, and by 2026-09-23 it was passing by ACCIDENT:
+# its regex was case-sensitive and the new key's constant is upper case, so the very storage it was
+# meant to govern slipped straight past it. Name both tiers instead of banning one mechanism.
 check('"Do it later" is remembered for the session only',
-      'sessionStorage' in js and re.search(r'localStorage[^\n]*catchup', js) is None)
+      'sessionStorage.setItem(CATCHUP_SNOOZE' in js)
+check('  and the checkbox that does persist is keyed on the reader version',
+      'localStorage.setItem(hushKey' in js
+      and '`${CATCHUP_HUSH}.${j.reader}`' in js)
 check('  and says where the action went', 'Rescan all libraries' in js)
 # REPLACED 2026-09-14. It said "This version has new features that won't work until a rescan",
 # which points at the interface, where nothing changes. Every alternative that named WHAT improved
@@ -196,7 +209,22 @@ check('  and says where the action went', 'Rescan all libraries' in js)
 # "will 1 ALWAYS be true?" It would not have been. This sentence describes the GAP rather than what
 # filled it, so it is true of every bump there can be, and what improved goes in the release notes.
 check('the dialog uses the author\'s wording',
-      'Your libraries were indexed by an older version' in js)
+      'indexed by an older version. Rescanning brings ${them} up to date with ' in js)
+# HOW MANY OF HOW MANY, the author's ask on 2026-09-23. The first clause used to read "Your
+# libraries", which says every one of them is stale when usually only some are. Each branch is
+# pinned separately: they are different sentences and only one is ever on screen.
+check('  and says how many libraries are behind, of how many there are',
+      '`${nBehind} of ${nTotal} libraries ' in js)
+check('    with the verb following the NUMERATOR, not the word libraries',
+      """${nBehind === 1 ? 'was' : 'were'}""" in js)
+check('    and a word, not a digit, when every library is behind',
+      """'Both libraries were'""" in js and '`All ${nTotal} libraries were`' in js)
+check('    and the singular library never reads "1 of 1"',
+      """nTotal <= 1 ? 'Your library was'""" in js)
+# The numerator is what pressing Rescan would TOUCH, so a library that is behind AND offline is not
+# in it -- that one is named in the skip sentence, which is the honest place for it.
+check('    counting only the libraries this run would reach',
+      'const nBehind = live.length;' in js)
 # The heading carries the version so the sentence can be about what to do. It is also the one place
 # the release number is spoken to a person, which is why it degrades to a plain sentence rather than
 # printing "version  of" when the server sends none.

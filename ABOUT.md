@@ -1,14 +1,16 @@
 # About VV Curator
 
-**A curation tool for people who generate with ComfyUI and end up drowning in their own output.**
+**Browse and curate ComfyUI outputs, then post them to Civitai.**
 
 Sifting through thousands of images is hard. If yours are spread across folders you named in a
 hurry, and going back through them has never quite worked, that's the problem this solves.
 
-It reads the workflow ComfyUI embeds in a PNG, and the copy it puts in a WebP or JPEG's EXIF, so the
-whole library becomes searchable by prompt, model and LoRA. Then it helps you finish the job:
-collapse a generation into one card, mark the keeper, recycle the rest, and export the good ones
-with Civitai metadata.
+It reads the workflow ComfyUI embeds in a PNG, and the copy it puts in a WebP or JPEG’s EXIF, so the
+whole library becomes searchable. One box covers the prompt, the model, the filename and the
+folder at once, so you don't have to remember which one it was. Then it helps you finish the
+job: collapse a run's outputs into one card, mark the keeper, recycle the rest, and send the best
+of them straight to Civitai, with their prompts, models and LoRAs already filled in. Nothing is
+public until you publish it there yourself.
 
 **The base app, with no extensions switched on, is local only. Nothing leaves your machine.** There
 is no account and no telemetry. Its one outbound request is at startup, asking GitHub whether a

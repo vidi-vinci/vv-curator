@@ -1,11 +1,17 @@
 # VV Curator
 
-**A curation tool for people who generate with ComfyUI and end up drowning in their own output.**
+**Browse and curate ComfyUI outputs, then post them to Civitai.**
 
 Point it at one folder and you can scroll everything underneath it — every subfolder, in one grid,
 with no opening folders one at a time. It reads the workflow ComfyUI embeds in your files, so the
-whole library becomes searchable by prompt, model and LoRA — then helps you finish the job: collapse
-a run into one card, mark the keeper, recycle the rest, and export the good ones with Civitai metadata.
+whole library becomes searchable. One box covers the prompt, the model, the filename and the
+folder at once, so you don't have to remember which one it was. Then it helps you finish the
+job: collapse a run's outputs into one card, mark the keeper, and recycle the rest.
+
+**The last step happens in the app.** Select your keepers, press Post, and they go up to Civitai
+together as one draft, with their prompts, models and LoRAs already filled in. Nothing is public
+until you publish it there yourself. If you would rather upload by hand, *Export for Civitai*
+still writes you the file.
 
 Built and used against **110k+ files across five libraries** — two local, three on network
 shares.
@@ -109,8 +115,8 @@ your Python, and a few view preferences your browser keeps for the page.
 
 ## What it does
 
-- **Search every folder at once** — by prompt, model, LoRA, folder, filename, type or date, across
-  every library you've added.
+- **Search every folder at once** — by prompt, model, filename or folder, in one box and across
+  every library you've added. Narrow it by type, date, model type and more.
 - **A generation is one card.** The stills and the video from a single run collapse to one thumbnail,
   so a run reads as one thing rather than six. Mark the keeper, recycle the rest, and apply that same
   decision to every matching set in the folder.

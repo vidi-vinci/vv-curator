@@ -109,8 +109,20 @@ function fnBody(decl) {
   const offer = fnBody('async function offerCatchUp(');
   check('the update offer runs the same function the menu does', /runRescanAll\(/.test(offer));
   check('  and asks before it, never during', /uiConfirm\(/.test(offer));
+  // TWO TIERS, and they must not collapse into one. "Do it later" stays sessionStorage, so a
+  // postponed rescan returns next launch rather than being lost. The checkbox is the other
+  // answer and is allowed to persist -- but only KEYED ON THE READER, which is what makes it
+  // reset on a build that reads more. A bare localStorage key here would be "never again",
+  // and the user would never learn a later version left their library behind.
   check('  "Do it later" is remembered for the session only, so it returns next launch',
-    /sessionStorage/.test(offer) && !/localStorage/.test(offer));
+    /sessionStorage\.setItem\(CATCHUP_SNOOZE/.test(offer));
+  check('  and the opt-out persists, scoped to the reader version',
+    /localStorage\.setItem\(hushKey/.test(offer) && /CATCHUP_HUSH\}\.\$\{j\.reader\}/.test(offer));
+  // PRESENCE BEFORE ORDER: indexOf returns -1 for a string that is gone, which is less than
+  // everything, so an order-only check goes green the moment the thing it guards is deleted.
+  check('    read on EITHER button, so Escape and Rescan now both honour it',
+    /dlgChecked\(\)/.test(offer) && /if \(!go\)/.test(offer)
+    && offer.indexOf('dlgChecked()') < offer.indexOf('if (!go)'));
   check('  and says where the action went', /Rescan all libraries/.test(offer));
 
   // ---- 5. reachable from the menu -------------------------------------------------------------

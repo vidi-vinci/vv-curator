@@ -371,6 +371,9 @@ on sends it.
 
 ## Known gaps
 
+- **The search box does not find LoRAs.** It covers the prompt, the model, the filename and the
+  folder; a LoRA's name is stored and shown in the detail view, and goes out with a Civitai
+  post or export, but no search or filter matches it. Closed by the author 2026-09-24.
 - **Clicking a tag suggestion identical to what you already typed does nothing** — the browser fires
   no event at all when the value doesn't change. Press `Enter` instead, which always works.
 - **A custom stage can only be the first one.** It cannot sit in the middle of a pipeline or at the

@@ -2956,6 +2956,15 @@ button.lib-stat:hover { background-color: var(--hover-lift); color: var(--fg); }
 .dialog-choices input { margin-top:2px; flex: 0 0 auto; }   /* aligns the box to the first line, not the block */
 .dialog-choices .dlg-choice-hint { display: block; color: var(--muted); font-size: var(--text-sm); }
 
+/* OPT-OUT: one checkbox that does not gate OK, sitting with the BUTTONS rather than the message.
+   It is a decision about the dialog, not an answer to its question -- placed up in the message
+   block it read as a third thing to weigh before answering. Muted and small for the same reason:
+   it must not compete with the two buttons beside it. */
+.dialog-opt { display: flex; align-items: center; gap:var(--space-2); cursor: pointer;
+  margin:0 0 var(--space-3); color: var(--muted); font-size: var(--text-sm); }
+.dialog-opt.hidden { display: none; }
+.dialog-opt input { flex: 0 0 auto; margin:0; }
+
 /* COMPOSE MODE: a dialog that builds something rather than confirming it. The fields are the
    extension's own schema drawn by extFieldRow, so they arrive as .set-row and inherit Settings'
    spacing -- there is nothing to style here but the gap around the block. */

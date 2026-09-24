@@ -118,7 +118,17 @@ function folderLeaf(f) {
 }
 // ---- styled confirm/alert/prompt dialogs (replace the browser-native popups) ----
 let _dlgResolve = null;
+// The opt-out's state from the dialog that just closed, read with dlgChecked(). Kept OUT of the
+// resolved value on purpose: uiConfirm resolves a plain boolean and every existing caller stays as
+// it is, where threading a second value through would have touched all of them to serve one dialog.
+let _dlgLastChecked = false;
+function dlgChecked() { return _dlgLastChecked; }
 function _dlgClose(result) {
+  // READ BEFORE HIDING, and on every route out -- OK, Cancel, Escape and the backdrop all land
+  // here. A ticked opt-out counts even when the dialog is dismissed with Escape: the tick is a
+  // statement about the dialog, not part of the answer to its question.
+  const _chk = $('#dlgCheck');
+  _dlgLastChecked = !_chk.classList.contains('hidden') && !!_chk.querySelector('input').checked;
   $('#dialog').classList.add('hidden');
   const r = _dlgResolve; _dlgResolve = null;
   if (r) r(result);
@@ -128,7 +138,7 @@ function _dlgClose(result) {
 // confirm that didn't ask for one. Same reason the default lives here and not in index.html.
 function _dlgOpen({ msg, title = null, ok = 'OK', cancel = 'Cancel', danger = false,
                    showCancel = true, input = null, choices = null,
-                   fields = null, values = null, strip = null }) {
+                   fields = null, values = null, strip = null, check = null }) {
   return new Promise(resolve => {
     _dlgResolve = resolve;
     // A heading only when one is asked for, and cleared when it is not — this dialog is reused for
@@ -183,6 +193,13 @@ function _dlgOpen({ msg, title = null, ok = 'OK', cancel = 'Cancel', danger = fa
     fieldBox.innerHTML = (fields || [])
       .map(f => extFieldRow({ id: 'dlg', values: values || {} }, f)).join('');
 
+    // OPT-OUT: `{label, checked}`, or null for the dialogs that have none. It never gates OK --
+    // unticked is the ordinary answer here, which is exactly why this is not CHOICES mode.
+    const chk = $('#dlgCheck');
+    chk.classList.toggle('hidden', !check);
+    chk.querySelector('input').checked = !!(check && check.checked);
+    $('#dlgCheckLabel').textContent = (check && check.label) || '';
+
     const okBtn = $('#dlgOk');
     okBtn.textContent = ok; okBtn.classList.toggle('danger', !!danger);
     const cancelBtn = $('#dlgCancel');
@@ -210,7 +227,7 @@ function _dlgSubmit() {   // OK: the composed values, the ticked choices, the in
 }
 function uiConfirm(msg, opts = {}) {
   return _dlgOpen({ msg, title: opts.title, ok: opts.ok || 'OK', cancel: opts.cancel,
-                    danger: opts.danger })
+                    danger: opts.danger, check: opts.check })
     .then(v => v === true);
 }
 // The title is OPTIONAL and most callers still pass none. An ordinary alert is one sentence and a
@@ -7587,11 +7604,21 @@ async function rescanCostLine() {
 // for an EXISTING library on an UPDATED build. Nothing here starts on its own: this asks, and the
 // long job is the user's click. See the no-background-jobs rule.
 //
+// TWO TIERS, because "later" and "stop asking" are different answers.
+//
 // "Do it later" is remembered for this SESSION only, so it returns next launch. A postponed rescan
 // that never comes back is a lost one, and the blanks stay with nothing left to prompt them —
-// sessionStorage is exactly "until you next start the app", where localStorage would be "never
-// again" and config would be "never again on this machine".
+// sessionStorage is exactly "until you next start the app".
+//
+// The CHECKBOX is the other answer, and it is scoped to the READER VERSION rather than being
+// forever. The author, 2026-09-23: "If they download a new version, then the 'Don't show again'
+// should reset." Keyed on the reader and not the app version because the reader is what puts a
+// library behind — an app update that reads no differently leaves nothing behind and never
+// reaches this dialog at all, so the reader key resets exactly when there is something new to
+// ask about. localStorage, not config: the app opens whatever browser is default and the author
+// judged a second browser a strong edge case, so a server round-trip buys nothing here.
 const CATCHUP_SNOOZE = 'vv.catchup.snoozed';
+const CATCHUP_HUSH = 'vv.catchup.hushed';
 // WHICH libraries are behind this build's reader, keyed by library. The launch dialog says THAT
 // some are; this is what lets each row say whether it is one of them, which is the question someone
 // who dismissed the dialog is left holding. The author, 2026-09-14: "if the user does it by hand, there
@@ -7618,11 +7645,29 @@ async function offerCatchUp() {
   try { j = await getJSON('/api/catchup'); } catch (e) { return; }
   noteBehind(j.libraries);
   try { if (sessionStorage.getItem(CATCHUP_SNOOZE)) return; } catch (e) {}
+  const hushKey = `${CATCHUP_HUSH}.${j.reader}`;
+  try { if (localStorage.getItem(hushKey)) return; } catch (e) {}
   const live = (j.libraries || []).filter(l => l.reachable);
   const off = (j.libraries || []).filter(l => !l.reachable);
   if (!live.length) return;                    // nothing to offer, or nothing reachable to offer it for
+  // HOW MANY OF HOW MANY, because the old first clause said "Your libraries" and implied every
+  // one of them was stale, when usually only some are. The author, 2026-09-23. The denominator is
+  // every configured library; the numerator is the ones pressing Rescan would actually touch, so
+  // a library that is behind AND offline is not counted here — it is named in `skip` below,
+  // which is the honest place for a library this run will not reach.
+  const nBehind = live.length;
+  const nTotal = (state.roots || []).length;
+  // THE VERB FOLLOWS THE NUMERATOR, not the word `libraries` in front of it: "1 of 4 libraries
+  // WAS indexed", which is the single-stale-library case and the commonest one after a
+  // targeted rescan. And `Both` at two, because "All 2 libraries" is what counting without
+  // reading gives you -- the same note already on rescanAllLibs' "all 1 libraries".
+  const scope = nTotal <= 1 ? 'Your library was'
+    : nBehind >= nTotal ? (nTotal === 2 ? 'Both libraries were' : `All ${nTotal} libraries were`)
+    : `${nBehind} of ${nTotal} libraries ${nBehind === 1 ? 'was' : 'were'}`;
+  const them = nBehind === 1 ? 'it' : 'them';
   const cost = j.seconds
-    ? `Rescanning takes ${fmtRoughTime(j.seconds)} for ${j.files.toLocaleString()} files.`
+    ? `Rescanning ${nBehind === 1 ? 'it' : `those ${nBehind}`} takes ` +
+      `${fmtRoughTime(j.seconds)} for ${j.files.toLocaleString()} files.`
     : `There are ${j.files.toLocaleString()} files to rescan.`;
   // Offline libraries are NAMED, not silently dropped: they keep their old stamps, so they are
   // offered again next launch, and saying so is the difference between a skip and a surprise.
@@ -7650,11 +7695,27 @@ async function offerCatchUp() {
     // proposal: "will 1 ALWAYS be true?" It would not have been. This sentence is true of every
     // bump there can be, because it describes the gap rather than what filled it. What improved
     // belongs in the release notes, which have room to say it.
-    `Your libraries were indexed by an older version. Rescanning brings them up to date with ` +
+    `${scope} indexed by an older version. Rescanning brings ${them} up to date with ` +
     `this one.` +
     `\n\n${cost}${skip}\n\nOr rescan them yourself: Rescan in each library's ⋯ menu, or ` +
     `Rescan all libraries in the Libraries menu.`,
-    { title, ok: 'Rescan now', cancel: 'Do it later' });
+    { title, ok: 'Rescan now', cancel: 'Do it later',
+      check: { label: "Don't show this again" } });
+  // READ ON EITHER BUTTON, and recorded before the rescan branch: ticking the box and pressing
+  // Rescan now is a coherent answer — a run stopped half way leaves rows behind, and the user
+  // has already said not to be asked about them. None of this touches the per-library marks in
+  // the Libraries list, so which libraries are behind stays answerable by anyone who looks.
+  if (dlgChecked()) {
+    try {
+      // Only the current reader's key survives. An older one can never be consulted again, since
+      // the key is rebuilt from j.reader on every launch, so keeping them is litter.
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(CATCHUP_HUSH + '.') && k !== hushKey) localStorage.removeItem(k);
+      }
+      localStorage.setItem(hushKey, '1');
+    } catch (e) {}
+  }
   if (!go) {
     try { sessionStorage.setItem(CATCHUP_SNOOZE, '1'); } catch (e) {}
     // WHERE IT WENT, so "later" is not a door closing. Named exactly as the menu item reads.

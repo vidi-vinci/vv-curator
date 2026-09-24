@@ -1413,6 +1413,13 @@
            schema, which is what keeps an extension from supplying markup. -->
       <div id="dlgStrip" class="dialog-strip hidden"></div>
       <div id="dlgFields" class="dialog-fields hidden"></div>
+      <!-- OPT-OUT MODE: one checkbox that does NOT gate OK and is read on EITHER button. Kept
+           separate from CHOICES above, which answers "which of these?" and disables OK until
+           something is ticked -- the opposite of what an opt-out needs, where nothing ticked is the
+           ordinary answer. Read with dlgChecked() after the dialog resolves. -->
+      <label id="dlgCheck" class="dialog-opt hidden">
+        <input type="checkbox"><span id="dlgCheckLabel"></span>
+      </label>
       <div class="dialog-actions">
         <button id="dlgCancel" class="ghost">Cancel</button>
         <button id="dlgOk" class="primary">OK</button>
