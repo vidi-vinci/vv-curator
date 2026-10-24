@@ -2491,7 +2491,7 @@ function dateBefore() { return state.dto ? String(Math.floor(new Date(state.dto 
 // and neither should react to a sort change, which narrows nothing.
 function sortIsDefault() { return state.sort === 'date' && state.order === 'desc'; }
 function anythingToReset() {
-  return filtersActive() || state.group === false || state.sets === false || !sortIsDefault();
+  return filtersActive() || !!state.coll || state.group === false || state.sets === false || !sortIsDefault();
 }
 // The strip's card readout: HOW MANY CARDS ARE IN THE GRID, and nothing else. It used to show
 // "matched / total", but the total is a constant you already know and restating it on every repaint

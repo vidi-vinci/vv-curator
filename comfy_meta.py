@@ -294,6 +294,38 @@ _NOT_CONDITIONING = frozenset(('clip', 'clip_vision', 'model', 'vae', 'latent', 
                                'image', 'images', 'mask', 'pixels'))
 
 
+def _is_text_encoder(ct, inp):
+    """Is this node a prompt? Asked of what the node IS, not of what it happens to carry.
+
+    The walk used to take any node with a `text` input, and every new node pack that has one
+    (LoRA Manager, a note, a string tool) became a way for the wrong words to reach a negative
+    prompt; each was patched by denying one more route in. This is the allowlist the denylist
+    above could never be: a class that says it encodes text, or one with the SDXL / wildcard
+    input names. Anything else reads as BLANK, which costs a glance. A wrong value gets published.
+    """
+    c = (ct or '').lower()
+    return 'textencode' in c or 'cliptext' in c or 'text_g' in inp or 'wildcard_text' in inp
+
+
+def _lora_node_texts(g):
+    """The `text` widgets of LoRA nodes: the placeholder and tags LoRA Manager keeps there."""
+    out = set()
+    for n in g.values():
+        if 'lora' in (n.get('class_type', '') or '').lower():
+            t = (n.get('inputs') or {}).get('text')
+            if isinstance(t, str) and t.strip():
+                out.add(t.strip())
+    return out
+
+
+def drop_lora_text(g, txt):
+    """Backstop for shapes not yet seen: text that IS a LoRA node's widget is never a prompt."""
+    t = (txt or '').strip()
+    if t and ('127.0.0.1:8188/loras' in t or any(t == w or w in t for w in _lora_node_texts(g))):
+        return ''
+    return txt
+
+
 def _follow_to_text(g, ref, seen=None, depth=0):
     """From a conditioning link, walk to the CLIPTextEncode and return its text."""
     if depth > 64 or not _is_link(ref):
@@ -311,7 +343,7 @@ def _follow_to_text(g, ref, seen=None, depth=0):
     inp = node.get('inputs', {})
     if ct == 'ConditioningZeroOut':
         return ''  # zeroed conditioning = no effective prompt (common on Flux negatives)
-    if 'CLIPTextEncode' in ct or 'text' in inp or 'text_g' in inp or 'wildcard_text' in inp:
+    if _is_text_encoder(ct, inp):
         txt = _encode_text(g, node)
         if txt:
             return txt
@@ -2132,7 +2164,8 @@ def _from_graph(pj, res, hints=None):
         pos, neg = _sampler_conditioning(g, sid)
         ptxt = _follow_to_text(g, pos) if _is_link(pos) else (pos if isinstance(pos, str) else '')
         ntxt = _follow_to_text(g, neg) if _is_link(neg) else (neg if isinstance(neg, str) else '')
-        return {'positive': ptxt, 'negative': ntxt, 'model': _resolve_model(g, sid)}
+        return {'positive': drop_lora_text(g, ptxt), 'negative': drop_lora_text(g, ntxt),
+                'model': _resolve_model(g, sid)}
 
     best, how = None, None
     if chain['sampler'] and chain['sampler'] in g:

@@ -290,7 +290,7 @@ def _text_from(g, sampler_id, key):
         return ""
     ref = node.get("inputs", {}).get(key)
     if comfy_meta._is_link(ref):
-        return comfy_meta._follow_to_text(g, ref) or ""
+        return comfy_meta.drop_lora_text(g, comfy_meta._follow_to_text(g, ref)) or ""
     return ref if isinstance(ref, str) else ""
 
 
