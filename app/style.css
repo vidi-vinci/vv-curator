@@ -742,6 +742,20 @@ body.resizing { cursor: col-resize; user-select: none; }
   border-radius: var(--radius-sm); color: var(--muted); cursor: pointer; }
 #sidebar .brand .brand-btn:hover { background: var(--hover-lift); color: var(--fg); }
 #sidebar .brand .brand-btn svg { width: var(--glyph-sm); height: var(--glyph-sm); }
+/* The trace marker and the viewer's Stop exist only while the trace records. Own .hidden each,
+   per the no-global-utility rule. */
+#sidebar .brand #btnTrace.hidden, #traceStop.hidden { display: none; }
+/* RECORDING, said slowly, in --modified: the app's "something wants your attention" amber, as the
+   update arrow beside it uses. Not --danger, nothing has failed; not --active, that means a filter
+   is on. The author, 2026-10-25: more prominent, WCAG-compliant.
+   The shared cv-pulse at 2.4s against the busy marks' 0.7s (on for a while, not about to finish),
+   and only down to 80%: the old dip to 35% took the glyph to 1.9:1 on the rail. Measured against
+   --sidebar-bg, at full / at the 80% trough: dark 8.6 / 5.8, light 4.9 / 3.4, so it holds the
+   3:1 a meaningful graphic needs (1.4.11) all the way round. Keeps its colour on hover, as
+   #btnUpdate does. Still for reduced motion. */
+#sidebar .brand #btnTrace, #sidebar .brand #btnTrace:hover { color: var(--modified); }
+#sidebar .brand #btnTrace svg { --pulse-low: .8; animation: cv-pulse 2.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { #sidebar .brand #btnTrace svg { animation: none; } }
 #sidebar .brand #btnHelp { margin-left:auto; }   /* push help + gear to the right edge */
 /* ---- the update mark ---------------------------------------------------------------------------
    THE GAP MOVES TO WHICHEVER BUTTON COMES FIRST. #btnHelp owns the auto margin normally; when the
@@ -753,6 +767,10 @@ body.resizing { cursor: col-resize; user-select: none; }
    something is ever inserted between them rather than silently still applying. */
 #sidebar .brand #btnUpdate:not(.hidden) { margin-left:auto; }
 #sidebar .brand #btnUpdate:not(.hidden) + #btnHelp { margin-left:0; }
+/* The trace marker comes first of all when it is shown, so it takes the gap from both. */
+#sidebar .brand #btnTrace:not(.hidden) { margin-left:auto; }
+#sidebar .brand #btnTrace:not(.hidden) ~ #btnUpdate,
+#sidebar .brand #btnTrace:not(.hidden) ~ #btnHelp { margin-left:0; }
 /* Scoped, because there is no global .hidden utility in this app -- every component declares its
    own. See the note on .lib-hidden. */
 #sidebar .brand #btnUpdate.hidden { display: none; }
@@ -1396,6 +1414,7 @@ select:focus { transition: none; }
 #libAdd, #selTag { --ico: var(--icon-plus); }
 #selFav { --ico: var(--icon-star); }
 #minerRemine, #libRescanAll { --ico: var(--icon-refresh); }
+#findDupes { --ico: var(--icon-layers); }
 button.done { --ico: var(--icon-check); }
 #selRename { --ico: var(--icon-pencil); }
 #selGroup { --ico: var(--icon-list); }
@@ -1484,7 +1503,8 @@ button.done { --ico: var(--icon-check); }
    INSIDE the flex wrapper, so the direct-child rule above it missed, and one label rendered in
    sentence case beside a column of uppercase ones. Extended rather than given a rule of its own —
    the spec is meant to be the same everywhere a field is named. */
-.ctl-label, .field-head, .prompt-field > summary, .set-row > label, .set-inline > label {
+.ctl-label, .field-head, .prompt-field > summary, .set-row > label, .set-inline > label,
+.tip-line > label {
   font-size: var(--text-sm); text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
 }
 .ctl-label { margin:var(--space-2) var(--space-half) var(--space-half); }
@@ -1752,7 +1772,8 @@ button.lib-stat:hover { background-color: var(--hover-lift); color: var(--fg); }
    spinner, so it keeps the one rate.
    Animate the GLYPH, not the button — the button is a 21x25 rectangle. (The clock two rules up
    pulses its FILL instead, only because its on-state is a filled pill.) */
-@keyframes cv-pulse { 50% { opacity: .35; } }
+/* --pulse-low lets a mark that must stay legible dip less; the busy marks keep .35. */
+@keyframes cv-pulse { 50% { opacity: var(--pulse-low, .35); } }
 .lib-refall.busy { pointer-events: none; }
 .lib-refall.busy svg { animation: cv-pulse 0.7s ease-in-out infinite; }
 /* FIRST RUN ONLY: with no library this is the one control that does anything, and nothing marked
@@ -4552,8 +4573,41 @@ button.tertiary, button.ghost { background: transparent; }   /* .ghost = legacy 
 .set-row { margin-bottom:var(--space-4); }
 .set-row > label { display: block; margin-bottom:var(--space-1); }   /* type from shared cap-label (see LABELS) */
 .set-row input, .set-row textarea { width: 100%; }
-.set-check > label { display: flex; align-items: center; gap:var(--space-2); margin-bottom:var(--space-1);
+.set-check > label, .set-check .tip-line > label { display: flex; align-items: center; gap:var(--space-2); margin-bottom:var(--space-1);
   text-transform: none; letter-spacing: 0; font-size: var(--text-md); color: var(--fg); }
+/* A ROW'S NAME AND ITS (i), on one line. Two checkboxes can share it (Autoplay and Show Snapshots,
+   the author, 2026-10-25), spaced as two choices rather than one label. */
+.tip-line { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1) var(--space-2);
+  margin-bottom: var(--space-1); }
+.tip-line > label, .set-check .tip-line > label { margin-bottom: 0; }
+.set-check .tip-line > label + label { margin-left: var(--space-4); }
+/* NO RULE BETWEEN ROWS UNDER A HEADING. The heading already draws the section's line, and a line
+   under every row of it read as clutter (the author, 2026-10-25). Panels without headings keep it. */
+.settings-panel > .group-title ~ :not(.group-title) { border-top: 0; padding-top: 0; }
+/* THE INFO TIP: a setting's help sentence behind an (i), shown on hover AND keyboard focus, and
+   dismissed with Esc without moving focus (WCAG 1.4.13). Hover is on the WRAPPER, so the pointer can
+   travel from the button onto the text without it vanishing. The text is ordinary prose, so it resets
+   whatever caps or tracking it inherits from a heading it sits in. Never interactive inside: a link in
+   a tooltip cannot be reached. */
+/* ANCHORED TO THE ROW, not the icon: an (i) at the end of a long label sat near the panel's right
+   edge, and a tip hung off it ran out of the scrolling panel. Spanning the row keeps it inside and
+   always under the icon, so the pointer can move straight down onto it. */
+.tip-line, .settings-panel > .group-title { position: relative; }
+.info-tip { display: inline-flex; vertical-align: middle; }
+/* In a heading that spreads its children apart, the auto margin keeps the (i) beside the words. */
+.group-title > .info-tip { margin-left: var(--space-2); margin-right: auto; }
+.info-tip > .icon-btn { background: transparent; border-color: transparent; color: var(--muted);
+  padding: 0; width: var(--glyph-md); height: var(--glyph-md); }
+.info-tip > .icon-btn:hover, .info-tip > .icon-btn:focus-visible { color: var(--fg); }
+.info-tip > .tip { display: none; position: absolute; z-index: 30; left: 0; right: 0; top: 100%; margin-top: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--radius-field);
+  font-size: var(--text-sm); font-weight: 400; line-height: 1.5; text-transform: none; letter-spacing: normal;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .35); }
+.info-tip:hover > .tip, .info-tip:focus-within > .tip { display: block; }
+.info-tip.hush > .tip { display: none; }
+.info-tip .tip code { background: var(--bg2); padding: 1px var(--space-1); border-radius: var(--radius-sm);
+  font: 11px ui-monospace, monospace; }
 .set-row input[type=checkbox] { width: auto; }   /* the rule above is for text fields */
 .set-help { margin:0 0 var(--space-2); font-size: var(--text-sm); line-height: 1.5; color: var(--muted); }
 /* The live count the rail's ⊘ N and eye N used to carry, now a sentence-end fragment inside the

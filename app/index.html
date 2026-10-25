@@ -41,6 +41,9 @@
              means Export for Civitai. Not the Octocat either: it is a trademark, and a filled
              detailed mark in a row of outlines cannot read as one silhouette at 15px. The word
              GitHub goes inside the pop-up, where there is room to be explicit. -->
+        <!-- Shown only while the debug trace records, so it can neither be forgotten on nor hunted for
+             in Settings. Click opens the viewer, which has Stop. The author, 2026-10-25. -->
+        <button id="btnTrace" class="brand-btn hidden" title="Recording a debug trace. Click to view" aria-label="Debug trace is recording. View it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" /></svg></button>
         <button id="btnUpdate" class="brand-btn is-update hidden" title="A new version is available" aria-label="A new version is available"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14" /> <path d="m19 12-7 7-7-7" /></svg></button>
         <button id="btnHelp" class="brand-btn" title="Help" aria-label="Help"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /></svg></button>
         <button id="btnSettings" class="brand-btn" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /> <circle cx="12" cy="12" r="3" /></svg></button>
@@ -105,6 +108,9 @@
                  Clear Quality scores got. "All" means all: every file re-read, not the quick check
                  the ✓ does. -->
             <button id="libRescanAll" class="has-ico" type="button">Rescan all libraries…</button>
+            <!-- Across every library, so it lives with the other all-library action. Moved out of
+                 Settings 2026-10-25: it is something you run, not something you set. -->
+            <button id="findDupes" class="has-ico" type="button">Find duplicates…</button>
             <button id="libAdd" class="has-ico" type="button">Add library…</button>
           </div>
         </div>
@@ -769,6 +775,7 @@
           <button class="settings-tab" data-sec="miner">Miner</button>
           <button class="settings-tab" data-sec="cards">Cards</button>
           <button class="settings-tab" data-sec="appearance">Appearance</button>
+          <button class="settings-tab" data-sec="maintenance">Maintenance</button>
           <button class="settings-tab" data-sec="extensions">Extensions</button>
         </nav>
         <div class="settings-panels">
@@ -788,75 +795,58 @@
                library)", "(active root)", "(global default)" -- and the descriptor is where scope
                belongs. Checkboxes keep their inline label, which is the standard and not worth
                fighting. -->
+          <!-- HELP LIVES IN THE (i), NOT UNDER THE ROW. The author, 2026-10-25: General had grown too
+               long to scan, and most of its length was prose under each control. Each sentence moved
+               verbatim into an .info-tip, which shows on hover AND on keyboard focus (WCAG 1.4.13).
+               The Range lines stay visible: they are what you need while typing a number. -->
           <section class="settings-panel" data-sec="general">
             <div class="group-title">Viewing</div>
             <div class="set-row set-check">
-              <label><input type="checkbox" id="setAutoplay"> Autoplay videos</label>
-            </div>
-            <div class="set-row set-check">
-              <label><input type="checkbox" id="setShowSnapshots"> Show Snapshots</label>
-              <!-- The author's wording, 2026-09-08. The first version described what UNCHECKING does
-                   ("Hides the Snapshots row…") on a setting called Show Snapshots that ships
-                   checked — so it read backwards against its own label. This says what the feature
-                   IS first, which the old one never did, and it has to: someone who does not use
-                   Snapshots is exactly the person reading this, and "hides the Snapshots row" tells
-                   them nothing about what they would be giving up.
-                   The last clause is mine and is not decoration: "disable" reads as destructive
-                   beside something you have invested named filter sets in. -->
-              <p class="set-help">Snapshots are saved filter combinations with your custom names.
-                Uncheck to disable and hide this feature from the main sidebar. Your saved
-                snapshots are kept.</p>
+              <div class="tip-line">
+                <label><input type="checkbox" id="setAutoplay"> Autoplay videos</label>
+                <label><input type="checkbox" id="setShowSnapshots"> Show Snapshots</label>
+                <span class="info-tip"><button type="button" class="icon-btn" aria-label="About Show Snapshots" aria-describedby="tipSnapshots"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" /></svg></button><span class="tip" role="tooltip" id="tipSnapshots">Snapshots are saved filter combinations with your custom names. Uncheck to disable and hide this feature from the main sidebar. Your saved snapshots are kept.</span></span>
+              </div>
             </div>
             <div class="set-row">
-              <label for="setKeepBehavior">Keep behavior</label>
+              <div class="tip-line">
+                <label for="setKeepBehavior">Keep behavior</label>
+                <span class="info-tip"><button type="button" class="icon-btn" aria-label="About Keep behavior" aria-describedby="tipKeep"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" /></svg></button><span class="tip" role="tooltip" id="tipKeep">Where the detail view goes after you keep one image from a set.</span></span>
+              </div>
               <select id="setKeepBehavior">
                 <option value="next">Next card</option>
                 <option value="stay">Stay on card</option>
               </select>
-              <p class="set-help">Where the detail view goes after you keep one image from a set.</p>
             </div>
 
             <div class="group-title">ComfyUI</div>
             <div class="set-row">
-              <label for="setModelsDir">Models folder</label>
+              <div class="tip-line">
+                <label for="setModelsDir">Models folder</label>
+                <span class="info-tip"><button type="button" class="icon-btn" aria-label="About Models folder" aria-describedby="tipModels"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" /></svg></button><span class="tip" role="tooltip" id="tipModels">The default for every library. Lets <b>Export for Civitai</b> hash your checkpoints and LoRAs so Civitai links them; blank exports prompts and settings only.</span></span>
+              </div>
               <input type="text" id="setModelsDir" placeholder="e.g. D:\ComfyUI\models" spellcheck="false">
               <span id="setModelsDirStatus" class="set-test"></span>
-              <p class="set-help">The default for every library. Lets <b>Export for Civitai</b> hash
-                your checkpoints and LoRAs so Civitai links them; blank exports prompts and settings
-                only.</p>
             </div>
 
-            <!-- RECYCLING. Confirm-before sat mid-list until 2026-08-28; grouping it with the
-                 folder reminder is the point of the header, since both are about the same thing
-                 happening to the same files. .group-title is the sidebar's section header, reused
-                 rather than restyled — it already carries the top rule and the caps.
-                 THE BLURB IS THE ONE SECTION THAT GETS ONE (the author, 2026-09-08): this is the only
-                 place in the app where files leave, and the heading named the feature without ever
-                 saying what it does. Shaped like Miner's intro paragraph, which is the precedent. -->
-            <div class="group-title">Recycling</div>
-            <!-- IT SAID "Recycling never deletes" until 2026-09-11. The author: "that may be misleading.
-                 It DOES do what Windows does for local drives." He is right, and the code agrees with
-                 him — api_dupes_cull batches its work precisely because Windows silently purges the
-                 oldest bin contents once a drive's quota is exceeded. The app never deletes; Windows
-                 can. Comparing it to File Explorer carries the reassurance without the over-claim,
-                 because everyone already knows what a file in the Recycle Bin is worth. -->
-            <p class="set-help">Recycling does what deleting in File Explorer does: files go to the
-              Windows Recycle Bin, and stay there until it is emptied. On a network drive, where
-              Windows has no bin, they go to a <code>_ToRecycle</code> folder beside the library
-              instead. <button type="button" class="link" id="helpRecycling">More in Help</button></p>
+            <!-- RECYCLING groups confirm-before with the reminder: both are about the same thing
+                 happening to the same files. Its explanation is on the heading's (i): this is the
+                 only place in the app where files leave. Wording per the author, 2026-09-11 — it
+                 compares to File Explorer rather than claiming the app never deletes. -->
+            <div class="group-title">Recycling <span class="info-tip"><button type="button" class="icon-btn" aria-label="About Recycling" aria-describedby="tipRecycling"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" /></svg></button><span class="tip" role="tooltip" id="tipRecycling">Recycling does what deleting in File Explorer does: files go to the Windows Recycle Bin, and stay there until it is emptied. On a network drive, where Windows has no bin, they go to a <code>_ToRecycle</code> folder beside the library instead.</span></span></div>
             <div class="set-row set-check">
-              <label><input type="checkbox" id="setConfirmRecycle"> Confirm before recycling</label>
-              <p class="set-help">Actions reaching other folders or libraries always ask.</p>
+              <div class="tip-line">
+                <label><input type="checkbox" id="setConfirmRecycle"> Confirm before recycling</label>
+                <span class="info-tip"><button type="button" class="icon-btn" aria-label="About Confirm before recycling" aria-describedby="tipConfirm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" /></svg></button><span class="tip" role="tooltip" id="tipConfirm">Actions reaching other folders or libraries always ask.</span></span>
+              </div>
             </div>
             <div class="set-row set-check">
-              <label><input type="checkbox" id="setRecycleWarn"> Enable recycle reminder</label>
-              <p class="set-help">Triggers a toast message if either limit below is reached, then resets.</p>
+              <div class="tip-line">
+                <label><input type="checkbox" id="setRecycleWarn"> Enable recycle reminder</label>
+                <span class="info-tip"><button type="button" class="icon-btn" aria-label="About Enable recycle reminder" aria-describedby="tipReminder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" /></svg></button><span class="tip" role="tooltip" id="tipReminder">Triggers a toast message if either limit below is reached, then resets.</span></span>
+              </div>
             </div>
-            <!-- .set-sub, not a plain row: these belong to the checkbox above, so they are indented
-                 under it and the panel's between-rows rule is cancelled. Gated by it too — with the
-                 reminder off they are dimmed rather than left live and doing nothing.
-                 Stacked rather than columned: the fields are only as wide as their content, so
-                 columns sized to the panel left the second one stranded mid-panel. -->
+            <!-- Belongs to the reminder above: indented under it, and dimmed while it is off. -->
             <div class="set-sub" id="setRecycleNums">
               <div class="set-row">
                 <label for="setRecycleFiles">File limit</label>
@@ -870,28 +860,21 @@
               </div>
             </div>
 
-            <div class="group-title">Maintenance</div>
-            <!-- FIRST IN MAINTENANCE, not under Viewing: this is about the app itself rather than
-                 about the images, and it is the one row here that is a setting rather than an
-                 operation you press. It sits above the two irreversible buttons on purpose. -->
+            <div class="group-title">Updates</div>
             <div class="set-row set-check">
-              <label><input type="checkbox" id="setUpdateCheck"> Tell me when a new version is available</label>
-              <p class="set-help">Checks this app's GitHub page at startup and marks the sidebar if
-                there is a newer release. Nothing about you or your library is sent, and it never
-                downloads or installs anything.</p>
-            </div>
-            <div class="set-row">
-              <label>Duplicate files</label>
-              <p class="set-help">Across every library. Matches on filename, size and date; tags and
-                labels move to the copy you keep.</p>
-              <div class="set-inline">
-                <button id="findDupes" class="ghost">Find duplicates…</button>
+              <div class="tip-line">
+                <label><input type="checkbox" id="setUpdateCheck"> Tell me when a new version is available</label>
+                <span class="info-tip"><button type="button" class="icon-btn" aria-label="About update checks" aria-describedby="tipUpdate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" /></svg></button><span class="tip" role="tooltip" id="tipUpdate">Checks this app's GitHub page at startup and marks the sidebar if there is a newer release. Nothing about you or your library is sent, and it never downloads or installs anything.</span></span>
               </div>
             </div>
+          </section>
+          <!-- MAINTENANCE: tools for when something is wrong, kept out of General. The author, 2026-10-25. -->
+          <section class="settings-panel hidden" data-sec="maintenance">
             <div class="set-row set-check">
-              <label><input type="checkbox" id="setTrace"> Record a debug trace</label>
-              <p class="set-help">Records searches, timings and grid rebuilds; nothing leaves your
-                machine.</p>
+              <div class="tip-line">
+                <label><input type="checkbox" id="setTrace"> Record a debug trace</label>
+                <span class="info-tip"><button type="button" class="icon-btn" aria-label="About the debug trace" aria-describedby="tipTrace"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" /></svg></button><span class="tip" role="tooltip" id="tipTrace">Records searches, timings and grid rebuilds; nothing leaves your machine.</span></span>
+              </div>
               <div class="set-inline">
                 <button id="showTrace" class="ghost">Show trace…</button>
               </div>
@@ -1330,6 +1313,7 @@
     <div class="miner-box">
       <div class="settings-head">
         <h2 id="traceTitle">Debug trace</h2>
+        <button id="traceStop" class="mini-btn" title="Stop recording. What is here stays until you clear it or close the app">Stop</button>
         <button id="traceCopy" class="mini-btn" title="Copy the whole trace to the clipboard">Copy</button>
         <button id="traceClear" class="mini-btn" title="Throw away what has been recorded so far">Clear</button>
         <button class="close" aria-label="Close" title="Close (Esc)" id="traceClose"></button>

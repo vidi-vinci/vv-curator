@@ -161,6 +161,10 @@ line at the bottom of the window says so. Typed boxes save when you stop typing.
 | After marking a keeper | Next card |
 | Models folder (for Civitai export) | empty |
 | Tell me when a new version is available | On, after the first-run pop-up asks |
+**Maintenance**
+
+| Setting | Default |
+|---|---|
 | Record a debug trace | Off, and switches itself off when you close the app |
 
 **Recycling**
@@ -240,9 +244,11 @@ arrows with it. With "Next card" you have already been moved on, and nothing is 
 **File type asks what a card *is*, not what it contains.** While runs are collapsing, a run holding
 a video is a Video and appears under nothing else, even though a still is what you can see.
 
-**A refresh only looks in folders whose timestamp moved,** plus any it has never seen. If files
-arrive without changing a folder's timestamp, use the library's own `↻`. A file it cannot read is
-skipped and reported, never treated as deleted.
+**A refresh only looks in folders whose timestamp moved,** plus any it has never seen, and it
+counts the files in the folder you are generating into, because on some machines that folder's
+timestamp does not move when a file lands. **Once every 6 hours per library it reads every file**
+instead, to catch anything the timestamps missed, and says so while it runs. A file it cannot read
+is skipped and reported, never treated as deleted.
 
 **Rescanning never touches your curation.** Labels, tags, favourites and notes survive every
 rescan, including *Rescan all libraries…*.

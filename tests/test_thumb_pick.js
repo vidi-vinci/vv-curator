@@ -21,7 +21,7 @@ if (a < 0 || end < 0) throw new Error('could not find the thumb-size helpers in 
 const BODY = src.slice(a, end + 2);
 
 function build(dpr) {
-  return new Function('window', BODY + '\nreturn { thumbSizeFor, thumbAt };')({ devicePixelRatio: dpr });
+  return new Function('window', BODY + '\nreturn { thumbSizeFor, thumbAt, THUMB_REV };')({ devicePixelRatio: dpr });
 }
 
 let failures = 0;
@@ -78,25 +78,29 @@ console.log('\nThumbnail size choice\n');
 // 5. The rewrite must replace the size and disturb nothing else — v= and r= are the cache key and
 //    the library scope, and losing either serves the wrong image entirely (see the root-scoping bug).
 {
-  const { thumbAt } = build(1);
+  // ...and stamps the revision, which is what makes every browser ask again when it is bumped
+  // (see THUMB_REV). `t` is the only thing the rewrite adds.
+  const { thumbAt, THUMB_REV } = build(1);
+  const T = '&t=' + THUMB_REV;
   const url = '/thumb/4821?v=1699887654&r=abc123&s=512';
   const out = thumbAt(url, 128);
-  check('rewrites only the size', out === '/thumb/4821?v=1699887654&r=abc123&s=128', out);
+  check('rewrites only the size, and stamps the revision', out === '/thumb/4821?v=1699887654&r=abc123&s=128' + T, out);
+  check('  stamps it once when given its own output back', thumbAt(out, 512) === '/thumb/4821?v=1699887654&r=abc123&s=512' + T, thumbAt(out, 512));
   check('  keeps the cache-buster', /[?&]v=1699887654(&|$)/.test(out), out);
   check('  keeps the library scope', /[?&]r=abc123(&|$)/.test(out), out);
   check('  and the image id', out.startsWith('/thumb/4821?'), out);
 
   // s= first, and an absolute URL as the browser reports it from img.src
   check('handles s= in first position',
-    thumbAt('/thumb/9?s=512&v=2&r=z', 256) === '/thumb/9?s=256&v=2&r=z',
+    thumbAt('/thumb/9?s=512&v=2&r=z', 256) === '/thumb/9?s=256&v=2&r=z' + T,
     thumbAt('/thumb/9?s=512&v=2&r=z', 256));
   check('handles an absolute url',
     thumbAt('http://127.0.0.1:8770/thumb/9?v=2&r=z&s=512', 128)
-      === 'http://127.0.0.1:8770/thumb/9?v=2&r=z&s=128');
+      === 'http://127.0.0.1:8770/thumb/9?v=2&r=z&s=128' + T);
 
-  // A url with no s= is left alone rather than corrupted; the server defaults it.
-  check('leaves a url without s= untouched',
-    thumbAt('/thumb/9?v=2&r=z', 128) === '/thumb/9?v=2&r=z', thumbAt('/thumb/9?v=2&r=z', 128));
+  // A url with no s= keeps its size alone rather than corrupted; the server defaults it.
+  check('leaves the size alone when there is no s=',
+    thumbAt('/thumb/9?v=2&r=z', 128) === '/thumb/9?v=2&r=z' + T, thumbAt('/thumb/9?v=2&r=z', 128));
   check('survives an empty url', thumbAt('', 128) === '' && thumbAt(null, 128) === '');
 }
 

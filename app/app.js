@@ -299,6 +299,8 @@ function isTypingTarget(el) {
 //     busy" are separable — a round trip measured here alone bundles them together;
 //   · it records supersession. An abandoned search looks exactly like a fast one from the outside,
 //     and mistaking one for the other is precisely how a trace misleads.
+// NEVER A FILE OR FOLDER NAME, nor search text: the trace gets pasted into chats. The author, 2026-10-25.
+// Ids, counts and timings only.
 const Trace = (() => {
   const KEY = 'vv_trace';
   const MAX = 600;                       // a few minutes of real use; oldest fall off the front
@@ -341,7 +343,8 @@ function traceUrl(url) {
   if (!qs) return path;
   const keep = ['limit', 'offset', 'sort', 'order', 'folder', 'q', 'sets', 'group', 'id', 'keep'];
   const p = new URLSearchParams(qs);
-  const bits = keep.filter(k => p.get(k)).map(k => `${k}=${p.get(k)}`);
+  // A folder path or search text is the user's own words and file names: say it was set, not what.
+  const bits = keep.filter(k => p.get(k)).map(k => `${k}=${k === 'folder' || k === 'q' ? '…' : p.get(k)}`);
   return path + (bits.length ? '?' + bits.join('&') : '');
 }
 async function getJSON(url) {
@@ -2454,8 +2457,15 @@ function thumbSizeFor(cssPx) {
   const want = (cssPx || 192) * (window.devicePixelRatio || 1);
   return THUMB_SIZES.find(s => s >= want) || 512;
 }
+// BUMP TO MAKE EVERY BROWSER ASK AGAIN. Thumbnails are served with a day's max-age, so a wrong
+// one the server has since fixed stays on screen until its URL changes. 2: the reused-name bug
+// (2026-10-25), where a card kept the recycled picture's thumbnail after the server learned to
+// remake it. Costs one re-fetch of each card from the local server, not a regeneration.
+const THUMB_REV = 2;
 function thumbAt(url, cssPx) {
-  return String(url || '').replace(/([?&])s=\d+/, `$1s=${thumbSizeFor(cssPx)}`);
+  // Idempotent: a caller passes back a src this already built (the card-upsize path).
+  const u = String(url || '').replace(/([?&])s=\d+/, `$1s=${thumbSizeFor(cssPx)}`).replace(/&t=\d+/, '');
+  return u ? `${u}${u.includes('?') ? '&' : '?'}t=${THUMB_REV}` : u;
 }
 
 // Any user filter/tag/search narrowing the grid (the global hide-large is NOT a user filter).
@@ -4332,6 +4342,7 @@ const Job = (() => {
           catch (e) { settle(null, true); return; }
           if (job.ending) return;
           if (!s.running) { settle(s, false); return; }
+          if (spec.watch) spec.watch(s);   // sees every poll, silent or not
           // `silent` does FOUR jobs, and a run needs three of them but not this one. It suppresses
           // the blocked toast, the pill's lifetime and the teardown that would hide the run's Stop
           // between libraries -- all correct inside a Job.during. It also threw the progress away,
@@ -4391,9 +4402,12 @@ function jobPace(s, opts) {
 // Without it, every string here is exactly what it was, which is the point — a single library's
 // scan is the thing people already know the look of.
 function scanProgress(s, label, runLabel) {
+  // The 6-hour full rescan names itself. It rides an ordinary refresh, and without this a refresh
+  // that took seconds instead of a blink had no visible reason. The author, 2026-10-25.
+  if (s.periodic && !runLabel) label = 'Full rescan, done every 6 hours:';
   const lead = runLabel ? `${runLabel} · ` : `${label} `;
   if (!(s.total > 0)) {
-    return { pct: null, text: (runLabel ? `${runLabel} · ` : '') +
+    return { pct: null, text: (runLabel ? `${runLabel} · ` : s.periodic ? `${label} ` : '') +
                               `Counting files… · ${fmtTime(s.elapsed)} elapsed` };
   }
   return { pct: jobPct(s),
@@ -6484,7 +6498,15 @@ let _cancelledFirstIndex = null;    // the library key to remove once the scan h
 let _scanFirst = null;              // the latest scan status, so the stop button can read it
 function watchScan(label, quiet, runLabel) {
   _cancelledFirstIndex = null;   // belt and braces: no answer from a previous scan survives into this
+  let saidPeriodic = false;
   return Job.start({
+    // A QUIET scan has no progress line to carry "Full rescan, done every 6 hours", so auto-refresh
+    // says it with a toast instead, once per scan. The author asked for both, 2026-10-25.
+    watch: s => {
+      if (!quiet || runLabel || saidPeriodic || !(s && s.periodic)) return;
+      saidPeriodic = true;
+      toast(`Full rescan of ${libName(s.key)}, done every 6 hours…`);
+    },
     name: 'scan', blockedMsg: 'A scan', every: 400, silent: !!quiet, blocking: !quiet,
     runProgress: !!runLabel,   // silent, but still paints into the run's pill -- see Job.start
     statusUrl: '/api/scan/status', stopUrl: '/api/scan/stop',
@@ -6529,6 +6551,7 @@ function watchScan(label, quiet, runLabel) {
         await refreshView();      // paints the welcome itself now — see the reset branch in search()
         return;
       }
+      traceScan(s);
       if (s && !Job.inRun) await afterScanRefresh(quiet);
     },
     // No completion tail on a CLEAN scan, deliberately: a bar sitting on screen after the block
@@ -6545,6 +6568,22 @@ function watchScan(label, quiet, runLabel) {
                      : `Couldn't read ${f.toLocaleString()} files${why ? ' — first: ' + why : ''}`;
     },
   });
+}
+// One line per finished scan, for the two refresh complaints: QUICK or FULL (and why) says whether
+// a slow refresh was the six-hour full walk, and `read N s after it changed` names a folder whose
+// next file could go unseen — compare it with the file that never appeared.
+function traceScan(s) {
+  const st = s && s.stats;
+  if (!Trace.on || !st) return;
+  const kind = st.kind === 'full' ? `FULL (${st.why_full || 'reason unknown'})` : 'quick';
+  // No file or folder names anywhere in the trace: it gets pasted into chats. The author, 2026-10-25.
+  const after = Object.entries(st.after || {}).map(([k, v]) => `${k} ${v}s`).join(', ');
+  Trace.add('scan', `${libName(s.key)} · ${kind} · ${st.folders} folder(s) · walk ${st.walk_seconds}s`
+    + ` · read ${st.seconds}s${after ? ` (of which ${after})` : ''} · total ${s.elapsed}s`
+    + ` · +${st.added} new, ${st.updated} updated, ${st.removed} removed`);
+  for (const [, ago] of (st.hot || [])) {
+    Trace.add('scan', `  a folder was read ${ago}s after it changed — a file landing in the next 2s would be missed`);
+  }
 }
 // ---- extensions ------------------------------------------------------------------------------
 // An extension is a folder the server found, not a module this file knows about. The one thing
@@ -7430,8 +7469,18 @@ async function rewardSelected() {
 // Resolves TRUE when a library's reachability flipped, so the caller can repaint more than the row.
 async function fetchChanges() {
   try {
-    const j = await getJSON('/api/changes');
+    const j = await getJSON('/api/changes' + (Trace.on ? '?trace=1' : ''));
     state._changes = (j && j.changes) || {};
+    // "Up to date" with a new file sitting there: either the folder's timestamp did not move, or
+    // the file was not on disk yet. Only the disk can say which, so the server reports both.
+    for (const [key, p] of Object.entries((j && j.probe) || {})) {
+      if (!p) continue;
+      Trace.add('changes', `${libName(key)} · unchanged`
+        + (p.error ? ' · could not read its latest folder'
+          : ` · latest folder moved ${p.folder_moved}s since the last scan (needs over 2s)`
+          + (p.count_then != null ? ` · ${p.count_then} files then, ${p.count_now} now` : '')
+          + (p.newest_age != null ? ` · its newest file is ${p.newest_age}s old, ${p.indexed ? 'indexed' : 'NOT INDEXED'}` : '')));
+    }
     // The only thing that re-reads reachability on a running app. /api/config has it too, but that
     // is fetched at boot and on library edits, so a share coming back stayed marked offline until a
     // restart — and, worse, kept its files marked unusable while the grid went on showing CACHED
@@ -7798,6 +7847,7 @@ async function refreshChanged() {
   // Stop is also reachable from scans this function never started (the per-library mark, an index
   // build), and a flag left standing by one of those would make the next refresh scan nothing.
   _runStopped = false; _runError = null;
+  const done = Trace.start('refresh', 'manual refresh (↻ or R)');
   await Job.during(async () => {
     Job.say('Checking for changes…');           // stats every folder — not instant on a share
     _refreshBusy = true;
@@ -7805,13 +7855,16 @@ async function refreshChanged() {
     try { await checkChanges(); }               // re-run /api/changes and repaint the indicators
     finally { _refreshBusy = false; }
     const keys = Object.keys(state._changes || {}).filter(k => state._changes[k]);
-    if (!keys.length) return 'Libraries up to date';
+    if (!keys.length) { done('nothing changed on disk'); return 'Libraries up to date'; }
     for (const k of keys) {
       if (_runStopped) break;
       if (!(await rescanLib(k))) break;         // refused, or contact lost — don't roll on
     }
     // Whatever did get indexed should still show, so this runs even when the run was cut short.
+    const repaint = Trace.start('refresh', 'repaint after the scans');
     await afterScanRefresh(false);
+    repaint();
+    done(`${keys.length} librar${keys.length === 1 ? 'y' : 'ies'} changed`);
     return '';
   });
   // After the run's teardown, never before: it retires the pill on its way out, so a message raised
@@ -7930,7 +7983,7 @@ function traceMetaMethod(d) {
   if (!m) return;
   // Composed methods like `sidecar+saver-walk` are one answer topped up by another; name both.
   const words = m.split('+').map(part => _METHOD_WORDS[part] || part).join(' · then ');
-  Trace.add('metadata', `${words} · ${d.filename || d.id}`);
+  Trace.add('metadata', `${words} · image ${d.id}`);   // the id, never the filename
 }
 // "Am I mid-task in a modal?" — renaming, changing a setting, tagging a selection. Refreshing the
 // library under one of those is obviously wrong, so background work stands down for them.
@@ -9179,13 +9232,8 @@ $('#btnHelp').addEventListener('click', () => openHelp());
 // 'ref-settings' while the heading is "## Settings, and what each one starts as", i.e.
 // 'ref-settings-and-what-each-one-starts-as' -- helpJumpTo finds nothing and returns silently, so
 // the button opened Help at the top and looked like it simply scrolled badly. Older bug, found
-// 2026-09-08 while adding the second of these. If a heading is renamed, both of these move with it.
+// 2026-09-08. If the heading is renamed, this moves with it.
 $('#settingsHelp').addEventListener('click', () => openHelp('ref-settings-and-what-each-one-starts-as'));
-// Recycling's blurb. The detail has its own Help section, Recycling, which is where the
-// network-drive behaviour is written out.
-$('#helpRecycling').addEventListener('click', () => {
-  closeSettings(); openHelp('ref-recycling');
-});
 $('#helpClose').addEventListener('click', closeHelp);
 $('#help').querySelector('.overlay-bg').addEventListener('click', closeHelp);
 $('#helpToc').addEventListener('click', e => {
@@ -9208,8 +9256,24 @@ function openTraceModal() {
   out.scrollTop = out.scrollHeight;      // newest last, so open at the end
 }
 function closeTraceModal() { $('#traceModal').classList.add('hidden'); }
+// The header's trace icon and the viewer's Stop follow whether the trace is recording. Every path
+// that switches it calls this: the Settings checkbox, Stop, and boot (it survives a reload).
+function syncTraceUi() {
+  $('#btnTrace').classList.toggle('hidden', !Trace.on);
+  $('#traceStop').classList.toggle('hidden', !Trace.on);
+  $('#traceTitle').textContent = 'Debug trace' + (Trace.on ? '' : ' — not recording');
+}
+syncTraceUi();
+$('#btnTrace').addEventListener('click', openTraceModal);
+$('#traceStop').addEventListener('click', () => {
+  Trace.set(false);
+  $('#setTrace').checked = false;
+  syncTraceUi();
+  toast('Trace off');
+});
 $('#setTrace').addEventListener('change', e => {
   Trace.set(e.target.checked);
+  syncTraceUi();
   // Switching the trace on CLEARS it, so anything the app decided before this moment is gone —
   // including whether the auto-refresh clock is running, which is restored from localStorage before
   // boot and never mentioned again. Without this line a trace of "it didn't update" can open with
@@ -9223,7 +9287,24 @@ $('#traceClear').addEventListener('click', () => { Trace.clear(); $('#traceOut')
 $('#traceClose').addEventListener('click', closeTraceModal);
 $('#traceModal').querySelector('.overlay-bg').addEventListener('click', closeTraceModal);
 
-$('#findDupes').addEventListener('click', () => { closeSettings(); findDuplicates(); });
+$('#findDupes').addEventListener('click', () => { closeMenus(); findDuplicates(); });
+// Esc hides an open info tip WITHOUT closing the dialog under it or moving focus (WCAG 1.4.13).
+// Capture phase, so it answers before the Settings modal's own Esc. The tip comes back the next
+// time the pointer or focus arrives.
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  const open = [...document.querySelectorAll('.info-tip:hover, .info-tip:focus-within')]
+    .filter(t => !t.classList.contains('hush'));
+  if (!open.length) return;
+  open.forEach(t => t.classList.add('hush'));
+  e.preventDefault(); e.stopImmediatePropagation();
+}, true);
+for (const ev of ['mouseleave', 'focusout']) {
+  document.addEventListener(ev, e => {
+    const t = e.target.closest && e.target.closest('.info-tip');
+    if (t && (ev === 'focusout' || e.target === t)) t.classList.remove('hush');
+  }, true);
+}
 $('#dupesCull').addEventListener('click', cullDuplicates);
 $('#dupesClose').addEventListener('click', closeDupesModal);
 $('#dupesDone').addEventListener('click', closeDupesModal);

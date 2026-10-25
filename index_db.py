@@ -423,8 +423,9 @@ def recompute_model_types(conn, root_id=None):
     # raise TypeError at the very end of every scan — after the inserts, so the library looked
     # indexed while the column stayed empty. Caught end-to-end; a unit test with a friendlier
     # connection had passed.
-    rows = conn.execute("SELECT id, model, model_name FROM images "
+    rows = conn.execute("SELECT id, model, model_name, model_type FROM images "
                         "WHERE model IS NOT NULL AND model <> ''").fetchall()
+    current = {r[0]: r[3] or '' for r in rows}
     rows = [(r[0], r[1], r[2]) for r in rows]
     if not rows:
         return 0
@@ -491,7 +492,11 @@ def recompute_model_types(conn, root_id=None):
         else:
             hit = _family_in_name(model or name, ordered)
             fam = _canon(hit) if hit else ''
-        updates.append((fam, _id))
+        # ONLY WHAT CHANGED is written. This rewrote every row with a model, ~100k UPDATEs, after
+        # every scan: 1.2s of a quick scan that added one image on the author's desktop (traced 2026-10-25),
+        # for a column that almost never moves.
+        if fam != current.get(_id, ''):
+            updates.append((fam, _id))
     conn.executemany("UPDATE images SET model_type=? WHERE id=?", updates)
     conn.commit()
     return len(updates)
@@ -679,7 +684,9 @@ SCHEMA_VERSION = 5  # bump when the FTS layout changes (5 = index song lyrics to
 # 7 (2026-09-23): a run with no negative prompt no longer reports a LoRA node's text as one. The
 # fix landed 09-21 without a bump, so every file read under 6 kept the wrong negative and would
 # have carried it to Civitai. Caught the same way as 5: while checking what the 1.3 notes promise.
-READER_VERSION = 7
+# 8 (2026-10-25): set for 1.3.1. Only a text encoder supplies a prompt; a LoRA node's text never
+# does (a7c077c, 10-10, landed without a bump).
+READER_VERSION = 8
 
 # How many files a forced run must actually read before its speed is worth remembering. Enough to
 # level out a slow first folder, small enough that a modest library still produces a number.
@@ -1095,6 +1102,9 @@ def changed_dirs(db_path, root, root_id=None):
             results = list(ex.map(_check, items))
     changed = {rel for rel, ch, missing in results if ch and not missing}
     gone = {rel for rel, _ch, missing in results if missing}
+    grew = latest_folder_grew(db_path, root, root_id)
+    if grew is not None and grew not in gone:
+        changed.add(grew)
     return changed, gone
 
 
@@ -1168,18 +1178,114 @@ def changes_detected(db_path, root, root_id=None):
             return True     # folder vanished -> something changed
 
     if len(items) < _SIG_MIN_PARALLEL:
-        return any(_changed(it) for it in items)
+        if any(_changed(it) for it in items):
+            return True
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(_SIG_WORKERS, len(items))) as ex:
+            futures = [ex.submit(_changed, it) for it in items]
+            try:
+                for fut in concurrent.futures.as_completed(futures):
+                    if fut.result():
+                        return True     # early exit still works — the rest are dropped below
+            finally:
+                for fut in futures:
+                    fut.cancel()        # queued stats we no longer need; in-flight ones just finish
+    return latest_folder_grew(db_path, root, root_id) is not None
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(_SIG_WORKERS, len(items))) as ex:
-        futures = [ex.submit(_changed, it) for it in items]
+
+# THE LATEST FOLDER IS ALSO COUNTED, because its timestamp cannot be trusted. On the author's desktop a new
+# image sat on disk for over two minutes while its folder's mtime, as the app read it, had not
+# moved at all — so the ↻, the R key and auto-refresh all reported "up to date" (the author,
+# 2026-10-25, traced). Counting every folder would cost a listing each, near a full walk on a
+# share; generations land in ONE folder, the one holding the newest file, so only that is counted.
+# One listing per library per check. Same filter as walk_media, or the counts never agree and the
+# library rescans on every check.
+def _latest_key(root_id):
+    return 'latest_count:' + root_id if root_id is not None else 'latest_count'
+
+
+def _folder_path(root, rel):
+    root = os.path.abspath(root)
+    return root if rel == '.' else os.path.join(root, rel.replace('/', os.sep))
+
+
+def _media_count(dirpath):
+    n = 0
+    with os.scandir(dirpath) as it:
+        for e in it:
+            try:
+                if (not e.is_dir(follow_symlinks=False)
+                        and os.path.splitext(e.name)[1].lower() in MEDIA_EXTS):
+                    e.stat()                  # walk_media skips a file it cannot stat; so does this
+                    n += 1
+            except OSError:
+                continue
+    return n
+
+
+def latest_folder_grew(db_path, root, root_id=None):
+    """The latest folder's relpath if its media count differs from the last scan's, else None."""
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT value FROM meta WHERE key=?", (_latest_key(root_id),)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    try:
+        latest = json.loads(row[0])
+        now = _media_count(_folder_path(root, latest['folder']))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None                           # gone or unreadable: the mtime sweep handles that
+    return latest['folder'] if now != latest.get('count') else None
+
+
+def freshness_probe(db_path, root, root_id=None):
+    """For the debug trace only: what the change check would have to see to notice a new file.
+
+    Lists the folder that changed LAST at the previous scan (where generations have been landing)
+    and reports its stored and current mtime beside its newest media file, and whether that file is
+    indexed. A new file with an unmoved folder mtime means the timestamp is not being updated; no
+    new file means it was not on disk yet. One stat and one listing per library."""
+    stored = dir_signature(db_path, root_id)
+    if not stored:
+        return None
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT value FROM meta WHERE key=?", (_latest_key(root_id),)).fetchone()
+    finally:
+        conn.close()
+    latest = json.loads(row[0]) if row else {}
+    rel = latest.get('folder')                # the folder the count watches, when there is one
+    if rel not in stored:
+        rel = max(stored, key=stored.get)
+    old = stored[rel]
+    p = os.path.abspath(root) if rel == '.' else os.path.join(root, rel.replace('/', os.sep))
+    now = time.time()
+    out = {'stored_age': round(now - old, 1)}   # no names: the trace gets pasted into chats
+    try:
+        out['folder_moved'] = round(os.stat(p).st_mtime - old, 2)
+        if latest.get('folder') == rel:
+            out.update(count_then=latest.get('count'), count_now=_media_count(p))
+        newest = None
+        with os.scandir(p) as it:
+            for e in it:
+                if e.is_file() and os.path.splitext(e.name)[1].lower() in MEDIA_EXTS:
+                    st = e.stat()
+                    born = getattr(st, 'st_birthtime', st.st_ctime)
+                    if newest is None or born > newest[1]:
+                        newest = (e.name, born, e.path)
+    except OSError as e:
+        out['error'] = str(e)
+        return out
+    if newest:
+        conn = sqlite3.connect(db_path)
         try:
-            for fut in concurrent.futures.as_completed(futures):
-                if fut.result():
-                    return True     # early exit still works — the rest are dropped below
+            known = conn.execute("SELECT 1 FROM images WHERE path=?", (newest[2],)).fetchone()
         finally:
-            for fut in futures:
-                fut.cancel()        # queued stats we no longer need; in-flight ones just finish
-    return False
+            conn.close()
+        out.update(newest_age=round(now - newest[1], 1), indexed=bool(known))
+    return out
 
 
 def refresh_dir_sig(db_path, root, root_id, rel_folders):
@@ -1214,7 +1320,19 @@ def refresh_dir_sig(db_path, root, root_id, rel_folders):
                 pass
         if n:
             conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)", (key, json.dumps(sig)))
-            conn.commit()
+        # The app's own recycle also changes the latest folder's file count, and that must not
+        # flag it either.
+        lkey = _latest_key(root_id)
+        row = conn.execute("SELECT value FROM meta WHERE key=?", (lkey,)).fetchone()
+        latest = json.loads(row[0]) if row else None
+        if latest and latest.get('folder') in rel_folders:
+            try:
+                latest['count'] = _media_count(_folder_path(root, latest['folder']))
+                conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
+                             (lkey, json.dumps(latest)))
+            except OSError:
+                pass
+        conn.commit()
         return n
     finally:
         conn.close()
@@ -1385,11 +1503,19 @@ def scan(root, db_path, thumbs_dir=None, progress=None, should_stop=None, count_
     # signature it had already collected.
     narrow = only_dirs is not None
     known = set(dir_signature(db_path, root_id) or {}) if narrow else set()
+    t_walk = time.time()
     if narrow:
         all_files, all_dirs, bad_dirs = walk_media_subset(root, only_dirs, known)
     else:
         all_files, all_dirs = walk_media(root)   # (path, mtime, size) per file + {dir: mtime}
         bad_dirs = set()
+    t_walked = time.time()
+    # FOLDERS READ WHILE STILL CHANGING, for the debug trace. Their mtime is stored as the signature,
+    # and a file landing within MTIME_TOL of it moves the folder too little for changed_dirs() to
+    # notice, so that file is invisible to every later refresh. Recorded, not yet acted on: the trace
+    # is meant to show whether this is the image that never appears.
+    hot = sorted(((rel, round(t_walked - mt, 1)) for rel, mt in all_dirs.items()
+                  if t_walked - mt < MTIME_TOL + 1), key=lambda x: x[1])
 
     # map path -> (mtime, size, id) for incremental comparison — scoped to this root, and on a
     # quick scan to the folders actually walked. `folder` is stored with the platform separator
@@ -1511,6 +1637,15 @@ def scan(root, db_path, thumbs_dir=None, progress=None, should_stop=None, count_
         if progress and n % 100 == 0:
             progress(n, total, added, updated, skipped)
 
+    # Every step after the file loop is timed for the debug trace: a quick scan that read no files
+    # still took ~6s on the author's desktop, so the time is in one of these.
+    after = {'files': round(time.time() - t0, 2)}
+    _lap = [time.time()]
+
+    def lap(name):
+        after[name] = round(time.time() - _lap[0], 2)
+        _lap[0] = time.time()
+
     # The last tick, HERE and not after the passes below. Reporting every 100 files means the final
     # report lands on the last multiple of 100 — so a 6,246-file library stopped at 6,200 and the
     # bar sat on 99% for the whole back half of the scan, never reaching 100%. The passes below
@@ -1552,10 +1687,17 @@ def scan(root, db_path, thumbs_dir=None, progress=None, should_stop=None, count_
                 conn.execute("DELETE FROM collection_members WHERE image_id=?", (rid,))
                 removed += 1
 
-    # Sweep any orphans left by older versions of the prune above (cheap: indexed PKs).
-    conn.execute("DELETE FROM tags WHERE image_id NOT IN (SELECT id FROM images)")
-    conn.execute("DELETE FROM quality WHERE image_id NOT IN (SELECT id FROM images)")
+    lap('prune')
+    # Sweep any orphans left by older versions of the prune above. FULL WALKS ONLY: it reads the
+    # whole tags table, which cost 4.05s of a 5.6s quick scan for one new image on the author's desktop (traced
+    # 2026-10-25). Nothing current makes orphans — the prune above, the gone-folder pass below and
+    # delete_by_ids all take tag and quality rows with the image — so this is a legacy safety net,
+    # and the full walk every FULL_SCAN_MAX_AGE is often enough for one.
+    if not narrow:
+        conn.execute("DELETE FROM tags WHERE image_id NOT IN (SELECT id FROM images)")
+        conn.execute("DELETE FROM quality WHERE image_id NOT IN (SELECT id FROM images)")
 
+    lap('orphan sweep')
     # A FOLDER THAT IS GONE takes its rows with it. Only on a quick scan, and only for folders the
     # caller confirmed unreadable — with a sanity cap, because an offline share makes EVERY folder
     # look deleted and that is the one mistake here that destroys curation rather than costing time.
@@ -1584,6 +1726,7 @@ def scan(root, db_path, thumbs_dir=None, progress=None, should_stop=None, count_
                 conn.execute("DELETE FROM collection_members WHERE image_id=?", (rid,))
                 removed += 1
 
+    lap('gone folders')
     # Store the folder-mtime signature so a later cheap changes_detected() can flag "rescan me"
     # without re-walking. Only on a complete pass — a cancelled walk didn't see every folder, and an
     # empty one would store {} and permanently stop the ↻ from firing.
@@ -1602,6 +1745,24 @@ def scan(root, db_path, thumbs_dir=None, progress=None, should_stop=None, count_
                     sig.pop(k, None)
         conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
                      (sig_key, json.dumps(sig)))
+        # The latest folder's count, from THIS walk's own file list when it walked that folder, so
+        # a file landing after the listing is still a difference next time. Listed afresh only
+        # when the walk skipped it, which means nothing there changed by either measure.
+        # The latest folder is the one holding the NEWEST INDEXED FILE, not the newest folder mtime:
+        # making a subfolder also stamps its parent, which can leave the library root "newest" while
+        # the images land a level down.
+        newest = conn.execute(f"SELECT folder FROM images WHERE {q_where} ORDER BY mtime DESC LIMIT 1",
+                              q_params).fetchone()
+        if newest:
+            rel = newest[0].replace(os.sep, '/') or '.'
+            p = _folder_path(root, rel)
+            try:
+                cnt = (sum(1 for f in all_files if os.path.dirname(f[0]) == p)
+                       if rel in all_dirs else _media_count(p))
+                conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
+                             (_latest_key(root_id), json.dumps({'folder': rel, 'count': cnt})))
+            except OSError:
+                conn.execute("DELETE FROM meta WHERE key=?", (_latest_key(root_id),))
         # Only a FULL walk resets the clock — a quick scan looked at a handful of folders and has
         # no opinion about the rest, which is the whole reason the clock exists.
         if not narrow:
@@ -1621,16 +1782,26 @@ def scan(root, db_path, thumbs_dir=None, progress=None, should_stop=None, count_
         conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
                      ('read_rate:' + (root_id or ''), str(round(_read / _secs, 3))))
 
+    lap('signature')
     conn.commit()
+    lap('commit')
     recompute_groups(conn, root_id)   # merge pairs/sets within THIS root (cheap string pass)
-    recompute_model_types(conn)       # whole-library: the vocabulary spans every root
+    lap('groups')
+    # Whole-library, since the vocabulary spans every root, and skipped when this scan changed no
+    # row: the vocabulary is built only from rows, so nothing it decides can have moved.
+    if added or updated or removed:
+        recompute_model_types(conn)
+    lap('model types')
     conn.execute("PRAGMA optimize")
+    lap('optimize')
     conn.close()
     return {
         'total': total, 'processed': n, 'added': added, 'updated': updated,
         'skipped': skipped, 'removed': removed, 'no_meta': no_meta,
         'failed': failed, 'first_error': first_error,
         'stopped': stopped, 'seconds': round(time.time() - t0, 2),
+        'kind': 'quick' if narrow else 'full', 'folders': len(all_dirs),
+        'walk_seconds': round(t_walked - t_walk, 2), 'hot': hot[:5], 'after': after,
     }
 
 

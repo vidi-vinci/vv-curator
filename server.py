@@ -1177,7 +1177,7 @@ APP_NAME = 'VV Curator'
 # welcome after an update, and it is what a version check would compare against. READER_VERSION in
 # index_db.py is a different number for a different job: what the app can extract from a file. They
 # move independently, and a release that reads nothing new does not touch it.
-APP_VERSION = '1.3.0'
+APP_VERSION = '1.3.1'
 
 # ---- telling people a newer version exists ----------------------------------------------------
 # WHERE A RELEASE IS ANNOUNCED: owner/name of the GitHub repo. This is the whole reason the project
@@ -2784,7 +2784,7 @@ def run_scan(force=False, key=None):
         # answer — that reattach is how the old trap would otherwise come straight back.
         _scan_state.update(running=True, seen=0, total=0, added=0, updated=0,
                            skipped=0, done=False, stopped=False, cancel=False,
-                           key=rid, first_index=not _root_has_images(rid),
+                           key=rid, first_index=not _root_has_images(rid), periodic=False,
                            started_at=time.time(), ended_at=0.0, stats=None, error=None)
 
     def prog(done, total, a, u, s):
@@ -2814,6 +2814,11 @@ def run_scan(force=False, key=None):
             # reason, including reasons not yet identified.
             only_dirs = gone = None
             _age = index_db.full_scan_age(dbp, rid)
+            # WHY a walk was full, for the debug trace: a refresh that is sometimes slow is either
+            # this clock running out or something else, and the trace has to say which.
+            why_full = ('forced' if force else 'never walked in full' if _age is None
+                        else 'last full walk %.1fh ago' % (_age / 3600)
+                        if _age >= index_db.FULL_SCAN_MAX_AGE else None)
             if not force and _age is not None and _age < index_db.FULL_SCAN_MAX_AGE:
                 cd = index_db.changed_dirs(dbp, root, rid)
                 if cd is not None:
@@ -2821,12 +2826,19 @@ def run_scan(force=False, key=None):
                     # The root itself always goes in: a new folder is found by listing its parent,
                     # and '.' is the parent of the top level.
                     only_dirs = set(only_dirs) | {'.'}
+                else:
+                    why_full = 'no folder signature'
+            # Said in the progress line, so a refresh that suddenly takes seconds says why. The author
+            # never knew this happened (2026-10-25).
+            _scan_state['periodic'] = not force and _age is not None and _age >= index_db.FULL_SCAN_MAX_AGE
             # Metadata-only scan (fast at 20k); thumbnails are generated lazily
             # by serve_thumb the first time each image is viewed.
             stats = index_db.scan(root, dbp, thumbs_dir=None,
                                   progress=prog, count_cb=count_cb, force=force,
                                   should_stop=lambda: _scan_state['cancel'], root_id=rid,
                                   only_dirs=only_dirs, gone_dirs=gone)
+            if only_dirs is None:
+                stats['why_full'] = why_full
             _scan_state['stats'] = stats
             _scan_state['stopped'] = bool(stats.get('stopped'))
         except Exception as e:
@@ -3502,7 +3514,7 @@ def run_text_batch(ext_id, ids):
             # can be looked at. It is already on disk for anything the author has scrolled past.
             pic = None
             try:
-                rel = thumbs_mod.ensure_thumb(row['path'], THUMBS_DIR)
+                rel = thumbs_mod.ensure_thumb(row['path'], THUMBS_DIR, src_mtime=row['mtime'])
                 pic = os.path.join(THUMBS_DIR, rel) if rel else None
             except Exception:
                 pass
@@ -3988,7 +4000,7 @@ class Handler(BaseHTTPRequestHandler):
             if p == '/api/comfy/status':
                 return self._json({'ready': comfy_bridge_ready(), 'url': COMFY_URL})
             if p == '/api/changes':
-                return self.api_changes()
+                return self.api_changes(q)
             if p == '/api/catchup':
                 return self.api_catchup()
             if p == '/api/update':
@@ -5840,7 +5852,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _path_for(self, iid):
         conn = db()
-        r = conn.execute("SELECT path, thumb FROM images WHERE id=?", (iid,)).fetchone()
+        r = conn.execute("SELECT path, thumb, mtime FROM images WHERE id=?", (iid,)).fetchone()
         conn.close()
         return r
 
@@ -5880,8 +5892,13 @@ class Handler(BaseHTTPRequestHandler):
         # THUMB_SIZE so it regenerates at the current size instead of serving the stale one.
         if rel and not rel.startswith(f'{size}/'):
             rel = None
+        # A stored thumb older than its file is another picture's: the path was reused. See
+        # thumbs._fresh.
+        if rel and not thumbs_mod._fresh(os.path.join(THUMBS_DIR, rel), r['mtime']):
+            rel = None
         if not rel:
-            rel, src_size = thumbs_mod.ensure_thumb_sized(r['path'], THUMBS_DIR, size=size)
+            rel, src_size = thumbs_mod.ensure_thumb_sized(r['path'], THUMBS_DIR, size=size,
+                                                          src_mtime=r['mtime'])
             # Videos skip dimension probing at scan time; backfill from the poster frame now.
             # The dimensions come from the SOURCE, so they are worth recording whichever size was
             # generated; the thumb path is only stored when it is the one that column describes.
@@ -6503,7 +6520,7 @@ class Handler(BaseHTTPRequestHandler):
                     'files': files, 'seconds': round(secs) if secs else None,
                     'files_all': files_all, 'seconds_all': round(secs_all) if secs_all else None})
 
-    def api_changes(self):
+    def api_changes(self, q=None):
         """Cheap per-library freshness check: for each library, has anything on disk changed since
         its last scan (files/folders added/removed/renamed)? One stat per indexed folder — no full
         walk. Returns {key: changed}, driving the per-row ↻ indicator.
@@ -6517,7 +6534,8 @@ class Handler(BaseHTTPRequestHandler):
         The isdir also GUARDS the freshness check now. changes_detected stats a folder that is not
         there, which on a downed share is a wait for a timeout to learn something isdir already
         said."""
-        out, alive = {}, {}
+        out, alive, probe = {}, {}, {}
+        tracing = bool(q and q.get('trace'))       # sent only while the debug trace records
         for r in CONFIG['roots']:
             here = os.path.isdir(r['path'])
             alive[r['key']] = here
@@ -6527,8 +6545,13 @@ class Handler(BaseHTTPRequestHandler):
                     changed = index_db.changes_detected(LIBRARY_DB, r['path'], r['key'])
                 except Exception:
                     changed = False
+                if tracing and not changed:
+                    try:
+                        probe[r['key']] = index_db.freshness_probe(LIBRARY_DB, r['path'], r['key'])
+                    except Exception as e:
+                        probe[r['key']] = {'error': str(e)}
             out[r['key']] = changed
-        self._json({'changes': out, 'changed': any(out.values()), 'exists': alive})
+        self._json({'changes': out, 'changed': any(out.values()), 'exists': alive, 'probe': probe})
 
     def api_tags(self, q=None):
         """The sidebar's numbers: every user tag with its count, and the favourite count. Scoped to
@@ -6546,7 +6569,7 @@ class Handler(BaseHTTPRequestHandler):
 
         It was also guarding against something this app cannot produce. Every path that removes an
         image removes its tag rows in the same breath (index_db.delete_by_ids, delete_root, and the
-        scan's prune), and every scan then sweeps any legacy strays. So the guard is gone, and root
+        scan's prune), and every full scan then sweeps any legacy strays. So the guard is gone, and root
         scoping — when it applies at all — is one pass over the root index rather than a probe per
         row. Phases are reported so the next trace can say which third of this is slow.
 

@@ -48,7 +48,7 @@ for _y in range(0, 832, 4):                       # 4px blocks: survives downsca
                 _px[_x + _dx, _y + _dy] = _c
 _im.save(SRC)
 
-server.Handler._path_for = lambda self, iid: {'path': SRC, 'thumb': None}
+server.Handler._path_for = lambda self, iid: {'path': SRC, 'thumb': None, 'mtime': os.stat(SRC).st_mtime}
 
 httpd = ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
 PORT = httpd.socket.getsockname()[1]

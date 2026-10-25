@@ -55,8 +55,8 @@ someone else. Being straight about that up front:
 - **A permissive licence is not a support promise.** Not accepting pull requests, and there is no
   support commitment. You may fork it freely; that is the intended way to take it somewhere I'm not
   going to take it.
-- **Telling me something is broken is welcome, though.** During the beta especially:
-  [open an issue](https://github.com/vidi-vinci/vv-curator/issues). It is the only way I find out —
+- **Telling me something is broken is welcome, though.**
+  [Open an issue](https://github.com/vidi-vinci/vv-curator/issues). It is the only way I find out —
   the app reports nothing on its own. No promise about what gets fixed or when.
 - The optional quality scorer installs [pyiqa](https://github.com/chaofengc/IQA-PyTorch), which is
   PolyForm Noncommercial licensed. That applies to your use of the scorer, not to the viewer.

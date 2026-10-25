@@ -87,16 +87,46 @@ def _render_thumb(im, out, size, quality):
     im.save(out, 'WEBP', quality=quality, method=4)
 
 
-def ensure_thumb_sized(image_path, thumbs_dir, size=THUMB_SIZE, quality=THUMB_QUALITY):
-    """Create the thumbnail if missing. Returns (rel_path_or_None, src_size_or_None).
+def _fresh(out, src_mtime):
+    """A cached thumb is usable if it exists and is no older than its source.
+
+    THE AGE CHECK, because the cache is keyed by PATH and a path can come back holding a different
+    picture: recycle Maya_00052_.png and ComfyUI's counter writes the next generation to that same
+    name, which then showed the recycled image's thumbnail while hover showed the new file (the
+    author, 2026-10-25). src_mtime is the indexed row's, so this costs no stat of the source."""
+    try:
+        st = os.stat(out)
+    except OSError:
+        return False
+    return st.st_size > 0 and (src_mtime is None or st.st_mtime >= src_mtime)
+
+
+def ensure_thumb_sized(image_path, thumbs_dir, size=THUMB_SIZE, quality=THUMB_QUALITY,
+                       src_mtime=None):
+    """Create the thumbnail if missing or older than src_mtime. Returns (rel_path_or_None,
+    src_size_or_None).
 
     src_size is the source's full (width, height) and is only reported for videos on
     fresh generation, so the server can backfill video dimensions (which the scan skips).
     """
     rel = thumb_rel(image_path, size)
     out = os.path.join(thumbs_dir, rel)
-    if os.path.exists(out) and os.path.getsize(out) > 0:
+    if _fresh(out, src_mtime):
         return rel, None
+    rel, src_size = _make_thumb(image_path, out, rel, size, quality)
+    # Stamped no earlier than the source, so a source clock ahead of this one (a network share)
+    # cannot leave a just-made thumb looking stale and remade on every request.
+    if rel and src_mtime:
+        try:
+            now = os.stat(out).st_mtime
+            if now < src_mtime:
+                os.utime(out, (src_mtime, src_mtime))
+        except OSError:
+            pass
+    return rel, src_size
+
+
+def _make_thumb(image_path, out, rel, size, quality):
     ext = os.path.splitext(image_path)[1].lower()
     try:
         if ext in _VIDEO_EXTS:
@@ -127,9 +157,9 @@ def ensure_thumb_sized(image_path, thumbs_dir, size=THUMB_SIZE, quality=THUMB_QU
         return None, None
 
 
-def ensure_thumb(image_path, thumbs_dir, size=THUMB_SIZE, quality=THUMB_QUALITY):
-    """Create the thumbnail if missing; return its relative path, or None on failure."""
-    rel, _ = ensure_thumb_sized(image_path, thumbs_dir, size, quality)
+def ensure_thumb(image_path, thumbs_dir, size=THUMB_SIZE, quality=THUMB_QUALITY, src_mtime=None):
+    """Create the thumbnail if missing or stale; return its relative path, or None on failure."""
+    rel, _ = ensure_thumb_sized(image_path, thumbs_dir, size, quality, src_mtime)
     return rel
 
 

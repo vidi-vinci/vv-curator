@@ -29,35 +29,6 @@ press Post.
 
 ---
 
-<!--
-  THE BETA SECTION IS TEMPORARY and comes out when the beta ends. Nothing else points at it, which
-  is why this reminder is here.
-
-  TAKE THE ISSUES LINK WITH YOU when you delete this section — it is the only place the README says
-  where to report anything, and the Accessibility paragraph below asks people to report and stays.
-  Removing the beta section as written would leave two requests to report and no address.
-
-  The Accessibility section below it is NOT temporary — keep it when the beta section goes. It is
-  deliberately three sentences. It was once a four-bullet audit with contrast ratios in it, which
-  is what "update it as things get checked" turns into; if something is fixed, say so in a clause,
-  not a new bullet.
--->
-## This is the first beta
-
-This has only ever run on one machine, against one library. **The most useful thing you can report
-is whether it reads *your* files** — if images come up with no prompt or no model where you expect
-one, say so. That is the subsystem everything else hangs off.
-
-Also worth reporting: **A1111 / Forge output** (genuinely untested — one person with a Forge folder
-settles it), speed on your library, anything that assumes someone else's filename or folder habits,
-and anything you couldn't work out from the interface. That last one is a bug in the UI, not in you.
-
-Say how it went even if it went fine. There is no telemetry, so your report is the only way any of
-this is known.
-
-**Report it here:** [github.com/vidi-vinci/vv-curator/issues](https://github.com/vidi-vinci/vv-curator/issues).
-One place, so nothing gets lost in a comment thread. No template to fill in — a sentence is fine.
-
 ## Accessibility
 
 Not tuned for accessibility yet, though contrast is now measured in both themes and meets WCAG 2.1
@@ -67,6 +38,12 @@ unchecked. The one thing worth knowing:
 telling green from amber.
 
 If something specific stops you using it, please report it — a named problem is what gets fixed.
+
+## Reporting a problem
+
+**[github.com/vidi-vinci/vv-curator/issues](https://github.com/vidi-vinci/vv-curator/issues).** Pick
+the form that fits, or just write a sentence. The most useful report is a file whose prompt or
+model doesn't show up.
 
 ## Getting started
 
@@ -94,16 +71,6 @@ with no build step. The first index takes a while on a large library, then it st
 To remove it: delete the folder — your index, curation and settings go with it, and your library
 stays where it is. Two things sit elsewhere by nature: the three packages above, which live with
 your Python, and a few view preferences your browser keeps for the page.
-
-<!--
-  STACKED, NOT SIDE BY SIDE. GitHub renders README images at about 800px, so a two-column table
-  gives each shot ~400px -- a third of its real size, and the detail panel's values turn to mush.
-  Full width each, in exchange for a little scrolling.
-
-  They are JPEGs at 1600px rather than full-size PNGs: the originals were 6.4MB together, and these
-  ship in the tester zip as well as the repo, where that would have tripled the download for two
-  pictures anyone can see on GitHub. 620KB the pair, and at half size the difference is invisible.
--->
 
 ![The grid, filtered, with three cards selected](docs/img/grid.jpg)
 
@@ -168,8 +135,7 @@ The viewer works fine without it. It has [its own README](comfy_vv_saver/README.
 ## More
 
 [About](ABOUT.md) is what it's for and whether it's for you. [Help](docs/help.md) — the app's own
-**?** — holds keys, defaults and gotchas, and is authoritative for behaviour, and
-[DESIGN.md](DESIGN.md) covers the token and component system.
+**?** — holds keys, defaults and gotchas, and is authoritative for behaviour.
 Behavioural limits are listed under [Known gaps](docs/help.md#known-gaps) —
 chiefly that a video's prompt often can't be read from the file, and WebM carries none.
 
